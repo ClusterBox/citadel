@@ -3,6 +3,28 @@ module github.com/ClusterBox/citadel
 go 1.25.1
 
 require (
+	github.com/Masterminds/semver/v3 v3.4.0 // indirect
+	github.com/aws/aws-cdk-go/awscdk/v2 v2.240.0 // indirect
+	github.com/aws/constructs-go/constructs/v10 v10.5.1 // indirect
+	github.com/aws/jsii-runtime-go v1.127.0 // indirect
+	github.com/cdklabs/awscdk-asset-awscli-go/awscliv1/v2 v2.2.263 // indirect
+	github.com/cdklabs/awscdk-asset-node-proxy-agent-go/nodeproxyagentv6/v2 v2.1.0 // indirect
+	github.com/cdklabs/cloud-assembly-schema-go/awscdkcloudassemblyschema/v50 v50.4.0 // indirect
+	github.com/fatih/color v1.18.0 // indirect
+	github.com/inconshreveable/mousetrap v1.1.0 // indirect
+	github.com/mattn/go-colorable v0.1.14 // indirect
+	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/spf13/cobra v1.10.2 // indirect
+	github.com/spf13/pflag v1.0.9 // indirect
+	github.com/yuin/goldmark v1.7.16 // indirect
+	golang.org/x/lint v0.0.0-20241112194109-818c5a804067 // indirect
+	golang.org/x/mod v0.33.0 // indirect
+	golang.org/x/sync v0.19.0 // indirect
+	golang.org/x/sys v0.41.0 // indirect
+	golang.org/x/telemetry v0.0.0-20260213145524-e0ab670178e1 // indirect
+	golang.org/x/tools v0.42.0 // indirect
+	golang.org/x/tools/cmd/godoc v0.1.0-deprecated // indirect
+	golang.org/x/tools/godoc v0.1.0-deprecated // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.41.2 // indirect
 	github.com/aws/aws-sdk-go-v2/config v1.32.10 // indirect
