@@ -1,0 +1,21 @@
+name: simple-api
+region: us-east-1
+
+container:
+  port: 8080
+  cpu: 256
+  memory: 512
+  health_check_path: /health
+  health_check_grace_period: 30
+
+environments:
+  dev:
+    account: "123456789012"
+    min_capacity: 1
+    max_capacity: 2
+    fargate_spot: true
+
+secrets:
+  - DATABASE_URL
+  - API_KEY
+  - JWT_SECRET

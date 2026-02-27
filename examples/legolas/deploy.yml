@@ -1,0 +1,58 @@
+name: legolas
+region: us-east-1
+
+container:
+  port: 3002
+  cpu: 256
+  memory: 512
+  health_check_path: /health
+  health_check_grace_period: 60
+
+environments:
+  dev:
+    account: "454066810976"
+    min_capacity: 1
+    max_capacity: 2
+    fargate_spot: true
+  prod:
+    account: "454066810976"
+    min_capacity: 2
+    max_capacity: 10
+    fargate_spot: false
+
+secrets:
+  - DATABASE_HOST
+  - DATABASE_PORT
+  - DATABASE_USER
+  - DATABASE_PASSWORD
+  - DATABASE_NAME
+  - DATABASE_SSL_MODE
+  - PORT
+  - ENCRYPTION_KEY
+  - META_APP_ID
+  - META_APP_SECRET
+  - META_API_VERSION
+  - WEBHOOK_VERIFY_TOKEN
+  - OAUTH_CALLBACK_URL
+  - FRONTEND_URL
+  - SERVICE_NAME
+  - ENVIRONMENT
+  - R2_ACCOUNT_ID
+  - R2_ACCESS_KEY_ID
+  - R2_SECRET_ACCESS_KEY
+  - R2_BUCKET_NAME
+  - R2_PUBLIC_URL
+  - INSTAGRAM_APP_ID
+  - INSTAGRAM_APP_SECRET
+  - AWS_REGION
+  - AWS_ACCESS_KEY_ID
+  - AWS_SECRET_ACCESS_KEY
+  - INCOMING_MESSAGE_QUEUE_URL
+  - OUTGOING_MESSAGE_QUEUE_URL
+
+vpc:
+  max_azs: 2
+
+cloudfront:
+  enabled: true
+  comment: "Legolas HTTPS termination"
