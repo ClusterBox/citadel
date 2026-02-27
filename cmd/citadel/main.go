@@ -16,7 +16,7 @@ func main() {
 		Long: `Citadel makes container deployments as simple as the Serverless Framework
 experience — but targeting ECS/Fargate instead of Lambda.
 
-Single source of truth: deploy.yml defines everything about your deployment.`,
+Single source of truth: citadel.yml defines everything about your deployment.`,
 		Version: version,
 	}
 
@@ -25,7 +25,7 @@ Single source of truth: deploy.yml defines everything about your deployment.`,
 	var environment string
 	var dryRun bool
 
-	rootCmd.PersistentFlags().StringVar(&configPath, "config", "deploy.yml", "Path to deploy.yml")
+	rootCmd.PersistentFlags().StringVar(&configPath, "config", "citadel.yml", "Path to citadel.yml")
 	rootCmd.PersistentFlags().StringVarP(&environment, "env", "e", "", "Target environment (dev/prod)")
 	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "Show what would be done without executing")
 

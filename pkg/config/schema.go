@@ -7,7 +7,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// DeployConfig represents the deploy.yml schema
+// DeployConfig represents the citadel.yml schema
 type DeployConfig struct {
 	Name         string                 `yaml:"name"`
 	Region       string                 `yaml:"region"`
@@ -47,7 +47,7 @@ type CloudFrontConfig struct {
 	Comment string `yaml:"comment,omitempty"`
 }
 
-// Load reads and parses a deploy.yml file
+// Load reads and parses a citadel.yml file
 func Load(path string) (*DeployConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
