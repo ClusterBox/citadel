@@ -4,7 +4,7 @@ A declarative CDK deployment framework for AWS ECS/Fargate.
 
 ## Overview
 
-Citadel makes container deployments as simple as the Serverless Framework experience — but targeting ECS/Fargate instead of Lambda. You declare your app once in a `deploy.yml`. The tool handles SSM secret syncing, CDK infrastructure deployment, Docker build/push, and ECS service rollout in a single command.
+Citadel makes container deployments as simple as the Serverless Framework experience — but targeting ECS/Fargate instead of Lambda. You declare your app once in a `citadel.yml`. The tool handles SSM secret syncing, CDK infrastructure deployment, Docker build/push, and ECS service rollout in a single command.
 
 ```bash
 citadel deploy --env dev --deploy-infra
@@ -21,7 +21,7 @@ When you add a new secret (e.g. `INSTAGRAM_APP_ID`), you must update multiple pl
 
 ## The Solution
 
-**Single source of truth:** `deploy.yml` defines everything about your deployment.
+**Single source of truth:** `citadel.yml` defines everything about your deployment.
 
 Both the CLI tool and CDK constructs read from the same file. Write a secret name once, use it everywhere.
 
