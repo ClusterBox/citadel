@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 
+	"github.com/ClusterBox/citadel/pkg/pipeline"
 	"github.com/spf13/cobra"
 )
 
@@ -34,27 +36,45 @@ Single source of truth: citadel.yml defines everything about your deployment.`,
 		Use:   "deploy",
 		Short: "Full deployment pipeline (sync + infra? + build + deploy)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Printf("🏰 Citadel Deploy\n")
-			fmt.Printf("Config: %s\n", configPath)
-			fmt.Printf("Environment: %s\n", environment)
-			fmt.Printf("Dry run: %v\n", dryRun)
+			if environment == "" {
+				return fmt.Errorf("--env is required")
+			}
+
+			ctx := context.Background()
 			
-			// TODO: Implement deployment pipeline
-			return fmt.Errorf("not implemented yet")
+			envFile, _ := cmd.Flags().GetString("env-file")
+			deployInfra, _ := cmd.Flags().GetBool("deploy-infra")
+			wait, _ := cmd.Flags().GetBool("wait")
+
+			opts := &pipeline.DeployOptions{
+				ConfigPath:  configPath,
+				Environment: environment,
+				EnvFile:     envFile,
+				DeployInfra: deployInfra,
+				DryRun:      dryRun,
+				Wait:        wait,
+			}
+
+			return pipeline.Deploy(ctx, opts)
 		},
 	}
 
-	var deployInfra bool
-	deployCmd.Flags().BoolVar(&deployInfra, "deploy-infra", false, "Deploy/update CDK infrastructure")
+	deployCmd.Flags().String("env-file", ".env", "Path to .env file")
+	deployCmd.Flags().Bool("deploy-infra", false, "Deploy/update CDK infrastructure")
+	deployCmd.Flags().Bool("wait", false, "Wait for deployment to stabilize")
 
 	// sync-secrets command
 	syncSecretsCmd := &cobra.Command{
 		Use:   "sync-secrets",
 		Short: "Sync secrets from .env to SSM Parameter Store",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if environment == "" {
+				return fmt.Errorf("--env is required")
+			}
+
 			fmt.Printf("🔐 Syncing secrets to SSM\n")
-			// TODO: Implement secret sync
-			return fmt.Errorf("not implemented yet")
+			// TODO: Call SSM sync directly
+			return fmt.Errorf("not implemented yet - use 'deploy' command")
 		},
 	}
 
@@ -63,9 +83,13 @@ Single source of truth: citadel.yml defines everything about your deployment.`,
 		Use:   "build",
 		Short: "Build and push Docker image to ECR",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if environment == "" {
+				return fmt.Errorf("--env is required")
+			}
+
 			fmt.Printf("🐳 Building Docker image\n")
-			// TODO: Implement Docker build/push
-			return fmt.Errorf("not implemented yet")
+			// TODO: Call Docker build directly
+			return fmt.Errorf("not implemented yet - use 'deploy' command")
 		},
 	}
 
@@ -74,6 +98,10 @@ Single source of truth: citadel.yml defines everything about your deployment.`,
 		Use:   "status",
 		Short: "Show deployment status",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if environment == "" {
+				return fmt.Errorf("--env is required")
+			}
+
 			fmt.Printf("📊 Deployment Status\n")
 			// TODO: Implement status check
 			return fmt.Errorf("not implemented yet")
@@ -85,6 +113,10 @@ Single source of truth: citadel.yml defines everything about your deployment.`,
 		Use:   "logs",
 		Short: "Stream CloudWatch logs",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if environment == "" {
+				return fmt.Errorf("--env is required")
+			}
+
 			fmt.Printf("📜 Streaming logs\n")
 			// TODO: Implement log streaming
 			return fmt.Errorf("not implemented yet")
