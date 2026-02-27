@@ -7,6 +7,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ecr"
+	"github.com/aws/aws-sdk-go-v2/service/ecs"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 )
 
@@ -15,6 +16,7 @@ type Client struct {
 	Config aws.Config
 	SSM    *ssm.Client
 	ECR    *ecr.Client
+	ECS    *ecs.Client
 }
 
 // NewClient creates a new AWS client with the specified region
@@ -28,5 +30,6 @@ func NewClient(ctx context.Context, region string) (*Client, error) {
 		Config: cfg,
 		SSM:    ssm.NewFromConfig(cfg),
 		ECR:    ecr.NewFromConfig(cfg),
+		ECS:    ecs.NewFromConfig(cfg),
 	}, nil
 }
