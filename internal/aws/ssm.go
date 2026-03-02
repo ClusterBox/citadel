@@ -2,6 +2,7 @@ package aws
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/ClusterBox/citadel/internal/env"
@@ -73,9 +74,8 @@ func (c *Client) getParameter(ctx context.Context, name string) (string, error) 
 
 	output, err := c.SSM.GetParameter(ctx, input)
 	if err != nil {
-		// Check if parameter doesn't exist
 		var pnf *types.ParameterNotFound
-		if err.(*types.ParameterNotFound) != nil || err == pnf {
+		if errors.As(err, &pnf) {
 			return "", fmt.Errorf("parameter not found")
 		}
 		return "", err

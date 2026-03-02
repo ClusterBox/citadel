@@ -2,12 +2,14 @@ package docker
 
 import (
 	"archive/tar"
+	"bufio"
 	"context"
 	"encoding/base64"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/ClusterBox/citadel/pkg/config"
 	"github.com/aws/aws-sdk-go-v2/service/ecr"
@@ -55,9 +57,51 @@ func (c *Client) Build(ctx context.Context, cfg *config.DeployConfig, contextPat
 	}, nil
 }
 
-// createTarFromDirectory creates a tar archive from a directory
+// loadDockerignore reads a .dockerignore file and returns the ignore patterns
+func loadDockerignore(dir string) []string {
+	ignorePath := filepath.Join(dir, ".dockerignore")
+	f, err := os.Open(ignorePath)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	var patterns []string
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		patterns = append(patterns, line)
+	}
+	return patterns
+}
+
+// matchesIgnorePattern checks if a relative path matches any dockerignore pattern
+func matchesIgnorePattern(relPath string, patterns []string) bool {
+	for _, pattern := range patterns {
+		// Check exact directory/file name match
+		if matched, _ := filepath.Match(pattern, relPath); matched {
+			return true
+		}
+		// Check if any path component matches (e.g. "cdk.out" matches "cdk.out/nested/file")
+		parts := strings.Split(relPath, string(filepath.Separator))
+		for _, part := range parts {
+			if matched, _ := filepath.Match(pattern, part); matched {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// createTarFromDirectory creates a tar archive from a directory, respecting .dockerignore
 func createTarFromDirectory(dir string) (io.ReadCloser, error) {
 	r, w := io.Pipe()
+
+	// Always skip .git, load additional patterns from .dockerignore
+	ignorePatterns := loadDockerignore(dir)
 
 	go func() {
 		tw := tar.NewWriter(w)
@@ -69,9 +113,22 @@ func createTarFromDirectory(dir string) (io.ReadCloser, error) {
 				return err
 			}
 
-			// Skip .git directory
+			// Always skip .git directory
 			if fi.IsDir() && fi.Name() == ".git" {
 				return filepath.SkipDir
+			}
+
+			// Check .dockerignore patterns
+			relPath, err := filepath.Rel(dir, file)
+			if err != nil {
+				return err
+			}
+
+			if relPath != "." && matchesIgnorePattern(relPath, ignorePatterns) {
+				if fi.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
 			}
 
 			// Create tar header
@@ -80,11 +137,6 @@ func createTarFromDirectory(dir string) (io.ReadCloser, error) {
 				return err
 			}
 
-			// Update header name to be relative to context
-			relPath, err := filepath.Rel(dir, file)
-			if err != nil {
-				return err
-			}
 			header.Name = relPath
 
 			// Write header
@@ -168,8 +220,13 @@ func (c *Client) getECRAuthToken(ctx context.Context, ecrClient *ecr.Client) (st
 		return "", fmt.Errorf("failed to decode authorization token: %w", err)
 	}
 
-	// Create auth config JSON
-	authJSON := fmt.Sprintf(`{"username":"AWS","password":"%s"}`, string(decodedToken))
+	// Split "AWS:password" into username and password
+	parts := strings.SplitN(string(decodedToken), ":", 2)
+	if len(parts) != 2 {
+		return "", fmt.Errorf("invalid authorization token format")
+	}
+
+	authJSON := fmt.Sprintf(`{"username":"%s","password":"%s"}`, parts[0], parts[1])
 	return base64.URLEncoding.EncodeToString([]byte(authJSON)), nil
 }
 

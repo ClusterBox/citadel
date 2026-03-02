@@ -18,9 +18,11 @@ type DeployOptions struct {
 	Environment string
 	EnvFile     string
 	DeployInfra bool
+	SkipSSM     bool
 	DryRun      bool
 	StreamLogs  bool
 	Wait        bool
+	TailLines   int
 }
 
 // Deploy executes the full deployment pipeline
@@ -46,10 +48,10 @@ func Deploy(ctx context.Context, opts *DeployOptions) error {
 	fmt.Printf("   Account: %s\n", envCfg.Account)
 	fmt.Printf("\n")
 
-	// 2. Sync secrets to SSM
-	if opts.EnvFile != "" && !opts.DryRun {
+	// 2. Sync secrets to SSM (unless --skip-ssm)
+	if !opts.SkipSSM && opts.EnvFile != "" {
 		fmt.Printf("🔐 Syncing secrets to SSM Parameter Store...\n")
-		
+
 		awsClient, err := aws.NewClient(ctx, cfg.Region)
 		if err != nil {
 			return fmt.Errorf("failed to create AWS client: %w", err)
@@ -67,6 +69,8 @@ func Deploy(ctx context.Context, opts *DeployOptions) error {
 			return fmt.Errorf("missing required secrets")
 		}
 		fmt.Printf("\n")
+	} else if opts.SkipSSM {
+		fmt.Printf("⏭️  Skipping SSM secret sync (--skip-ssm)\n\n")
 	}
 
 	// 3. Deploy CDK infrastructure (if requested)
@@ -115,6 +119,25 @@ func Deploy(ctx context.Context, opts *DeployOptions) error {
 	}
 
 	fmt.Printf("✨ Deployment complete!\n")
+
+	// 6. Stream logs if requested
+	if opts.StreamLogs && !opts.DryRun {
+		fmt.Printf("\n📜 Streaming CloudWatch logs (Ctrl+C to exit)...\n\n")
+
+		awsClient, err := aws.NewClient(ctx, cfg.Region)
+		if err != nil {
+			return fmt.Errorf("failed to create AWS client for logs: %w", err)
+		}
+
+		tailLines := opts.TailLines
+		if tailLines <= 0 {
+			tailLines = 100
+		}
+
+		logsClient := awsClient.NewLogsClient()
+		return logsClient.StreamLogs(ctx, cfg, tailLines)
+	}
+
 	return nil
 }
 
@@ -144,6 +167,11 @@ func deployCDK(ctx context.Context, cfg *config.DeployConfig, opts *DeployOption
 	}
 
 	return cmd.Run()
+}
+
+// BuildAndPush is the exported entry point for the standalone build command
+func BuildAndPush(ctx context.Context, cfg *config.DeployConfig, opts *DeployOptions) (string, error) {
+	return buildAndPushImage(ctx, cfg, opts)
 }
 
 // buildAndPushImage builds and pushes the Docker image to ECR
