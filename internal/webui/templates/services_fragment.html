@@ -1,0 +1,20 @@
+{{define "services_fragment.html"}}
+<nav class="rail" id="services-rail" hx-get="/logs/services{{if .Selected}}?service={{.Selected}}{{end}}" hx-trigger="every 5s" hx-swap="outerHTML">
+  <h2>services</h2>
+  {{if not .Services}}
+    <p class="muted">no services registered. add one with<br><code>citadel logs-daemon register --env dev</code></p>
+  {{end}}
+  <ul>
+    {{range .Services}}
+    <li>
+      <a href="/logs?service={{.ID}}"{{if eq .ID $.Selected}} class="active"{{end}}>
+        <span class="svc-name">{{.Name}}</span>
+        <span class="svc-env">{{.Env}}</span>
+        <span class="svc-runtime">{{.Runtime}}</span>
+        {{if .ErrorCount}}<span class="badge">{{.ErrorCount}}</span>{{end}}
+      </a>
+    </li>
+    {{end}}
+  </ul>
+</nav>
+{{end}}

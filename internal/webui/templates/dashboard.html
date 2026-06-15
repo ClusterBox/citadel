@@ -1,0 +1,57 @@
+{{define "dashboard.html"}}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>citadel · logs</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/htmx.min.js" defer></script>
+  <script src="/static/sse.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <strong>citadel</strong>
+    <span class="muted">/ logs</span>
+  </header>
+
+  <main class="layout">
+    {{template "services_fragment.html" .}}
+
+    <section class="content">
+      {{if .Selected}}
+        <h1>{{.Selected}}</h1>
+        <div style="margin-bottom: 16px; border-bottom: 1px solid var(--border); padding-bottom: 8px;">
+          <button onclick="document.getElementById('errors-view').style.display='block'; document.getElementById('live-view').style.display='none';" style="background:var(--panel); color:var(--text); border:1px solid var(--border); padding:6px 12px; border-radius:4px; cursor:pointer; margin-right:8px;">Errors</button>
+          <button onclick="document.getElementById('errors-view').style.display='none'; document.getElementById('live-view').style.display='block';" style="background:var(--panel); color:var(--text); border:1px solid var(--border); padding:6px 12px; border-radius:4px; cursor:pointer;">Live Logs</button>
+        </div>
+
+        <div id="errors-view" style="display:block;">
+          <p class="muted">errors in the last 7 days · refreshes every 5s</p>
+          <div id="errors"
+               hx-get="/logs/errors?service={{.Selected}}"
+               hx-trigger="load, every 5s"
+               hx-swap="innerHTML">
+            <p class="muted">loading…</p>
+          </div>
+        </div>
+
+        <div id="live-view" style="display:none;">
+          <p class="muted">live tailing from cloudwatch...</p>
+          <table class="errors">
+            <thead>
+              <tr>
+                <th>when</th>
+                <th>message</th>
+              </tr>
+            </thead>
+            <tbody hx-ext="sse" sse-connect="/logs/stream?service={{.Selected}}" sse-swap="message" hx-swap="beforeend">
+            </tbody>
+          </table>
+        </div>
+      {{else}}
+        <h1>no service selected</h1>
+        <p class="muted">register a service from a citadel.yml repo to begin observing.</p>
+      {{end}}
+    </section>
+  </main>
+</body>
+</html>{{end}}

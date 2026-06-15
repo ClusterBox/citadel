@@ -1,0 +1,30 @@
+{{define "errors_fragment.html"}}
+{{if not .Errors}}
+  <p class="muted">no errors in the last 7 days. 🎉</p>
+{{else}}
+<table class="errors">
+  <thead>
+    <tr>
+      <th>when</th>
+      <th>status</th>
+      <th>message</th>
+      <th>request id</th>
+    </tr>
+  </thead>
+  <tbody>
+    {{range .Errors}}
+    <tr class="error-row {{statusClass .Status}}"
+        hx-get="/logs/error/{{.ID}}"
+        hx-target="next .detail"
+        hx-swap="innerHTML">
+      <td class="ts">{{fmtTime .TS}}</td>
+      <td class="status">{{if .Status}}{{.Status}}{{else}}{{.Level}}{{end}}</td>
+      <td class="message">{{.Message}}</td>
+      <td class="req">{{.RequestID}}</td>
+    </tr>
+    <tr><td colspan="4"><div class="detail"></div></td></tr>
+    {{end}}
+  </tbody>
+</table>
+{{end}}
+{{end}}

@@ -1,0 +1,15 @@
+{{define "error_detail.html"}}
+<div class="detail-card">
+  <dl>
+    {{if .RequestID}}<dt>request id</dt><dd>{{.RequestID}}</dd>{{end}}
+    {{if .LogStream}}<dt>log stream</dt><dd>{{.LogStream}}</dd>{{end}}
+    <dt>time</dt><dd>{{fmtTime .TS}}</dd>
+  </dl>
+  {{if .Stack}}
+  <h4>stack</h4>
+  <pre class="stack">{{.Stack}}</pre>
+  {{end}}
+  <h4>raw</h4>
+  <pre class="raw">{{.Raw}}</pre>
+</div>
+{{end}}
