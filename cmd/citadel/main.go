@@ -183,9 +183,14 @@ Single source of truth: citadel.yml defines everything about your deployment.`,
 
 			// Recent logs
 			fmt.Printf("\n📜 Recent Logs:\n")
-			logsClient := awsClient.NewLogsClient()
-			if err := logsClient.GetRecentLogs(ctx, cfg, 10); err != nil {
+			logGroup, err := ecsClient.DiscoverLogGroup(ctx, cfg)
+			if err != nil {
 				fmt.Printf("   Error: %v\n", err)
+			} else {
+				logsClient := awsClient.NewLogsClient()
+				if err := logsClient.GetRecentLogs(ctx, logGroup, 10); err != nil {
+					fmt.Printf("   Error: %v\n", err)
+				}
 			}
 
 			return nil
@@ -217,8 +222,13 @@ Single source of truth: citadel.yml defines everything about your deployment.`,
 				return fmt.Errorf("failed to create AWS client: %w", err)
 			}
 
+			logGroup, err := awsClient.NewECSClient().DiscoverLogGroup(ctx, cfg)
+			if err != nil {
+				return fmt.Errorf("failed to resolve log group: %w", err)
+			}
+
 			logsClient := awsClient.NewLogsClient()
-			return logsClient.StreamLogs(ctx, cfg, tailLines)
+			return logsClient.StreamLogs(ctx, logGroup, tailLines)
 		},
 	}
 
@@ -230,6 +240,7 @@ Single source of truth: citadel.yml defines everything about your deployment.`,
 	rootCmd.AddCommand(buildCmd)
 	rootCmd.AddCommand(statusCmd)
 	rootCmd.AddCommand(logsCmd)
+	rootCmd.AddCommand(newLogsDaemonCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

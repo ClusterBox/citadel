@@ -6,10 +6,41 @@ import (
 	"sort"
 	"time"
 
-	"github.com/ClusterBox/citadel/pkg/config"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
+	cwtypes "github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/types"
 )
+
+// FilterEventsPage is one page of results from FilterLogEvents, used by the
+// citadel-logs ingest loop. Events are NOT pre-sorted; callers should respect
+// the Timestamp on each event when persisting cursors.
+type FilterEventsPage struct {
+	Events    []cwtypes.FilteredLogEvent
+	NextToken *string
+}
+
+// FilterEvents fetches one page of events from logGroup with ts >= startMs
+// and ts < endMs. nextToken is forwarded transparently for pagination.
+// Limit is clamped to the CloudWatch maximum (10000); 0 means default (1000).
+func (lc *LogsClient) FilterEvents(ctx context.Context, logGroup string, startMs, endMs int64, limit int32, nextToken *string) (*FilterEventsPage, error) {
+	if limit == 0 {
+		limit = 1000
+	}
+	input := &cloudwatchlogs.FilterLogEventsInput{
+		LogGroupName: aws.String(logGroup),
+		StartTime:    aws.Int64(startMs),
+		EndTime:      aws.Int64(endMs),
+		Limit:        aws.Int32(limit),
+	}
+	if nextToken != nil {
+		input.NextToken = nextToken
+	}
+	out, err := lc.client.FilterLogEvents(ctx, input)
+	if err != nil {
+		return nil, err
+	}
+	return &FilterEventsPage{Events: out.Events, NextToken: out.NextToken}, nil
+}
 
 // LogsClient wraps CloudWatch Logs operations
 type LogsClient struct {
@@ -23,10 +54,8 @@ func (c *Client) NewLogsClient() *LogsClient {
 	}
 }
 
-// StreamLogs tails CloudWatch logs for the ECS service
-func (lc *LogsClient) StreamLogs(ctx context.Context, cfg *config.DeployConfig, tailLines int) error {
-	logGroupName := fmt.Sprintf("/ecs/%s", cfg.Name)
-
+// StreamLogs tails CloudWatch logs for the given log group
+func (lc *LogsClient) StreamLogs(ctx context.Context, logGroupName string, tailLines int) error {
 	// Get the most recent log streams
 	streamsOutput, err := lc.client.DescribeLogStreams(ctx, &cloudwatchlogs.DescribeLogStreamsInput{
 		LogGroupName: aws.String(logGroupName),
@@ -145,9 +174,7 @@ type logEvent struct {
 }
 
 // GetRecentLogs fetches the most recent log lines (non-streaming, for status command)
-func (lc *LogsClient) GetRecentLogs(ctx context.Context, cfg *config.DeployConfig, lines int) error {
-	logGroupName := fmt.Sprintf("/ecs/%s", cfg.Name)
-
+func (lc *LogsClient) GetRecentLogs(ctx context.Context, logGroupName string, lines int) error {
 	streamsOutput, err := lc.client.DescribeLogStreams(ctx, &cloudwatchlogs.DescribeLogStreamsInput{
 		LogGroupName: aws.String(logGroupName),
 		OrderBy:      "LastEventTime",

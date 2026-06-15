@@ -174,7 +174,41 @@ func buildIAMRoles(stack awscdk.Stack, cfg *config.DeployConfig) (awsiam.Role, a
 		AssumedBy: awsiam.NewServicePrincipal(jsii.String("ecs-tasks.amazonaws.com"), nil),
 	})
 
+	// Grant scoped SQS access to declared queues.
+	if cfg.Queues != nil {
+		if len(cfg.Queues.Consume) > 0 {
+			taskRole.AddToPolicy(awsiam.NewPolicyStatement(&awsiam.PolicyStatementProps{
+				Actions: jsii.Strings(
+					"sqs:ReceiveMessage",
+					"sqs:DeleteMessage",
+					"sqs:GetQueueAttributes",
+					"sqs:ChangeMessageVisibility",
+				),
+				Resources: arnPointers(cfg.Queues.Consume),
+			}))
+		}
+		if len(cfg.Queues.Produce) > 0 {
+			taskRole.AddToPolicy(awsiam.NewPolicyStatement(&awsiam.PolicyStatementProps{
+				Actions: jsii.Strings(
+					"sqs:SendMessage",
+					"sqs:GetQueueAttributes",
+				),
+				Resources: arnPointers(cfg.Queues.Produce),
+			}))
+		}
+	}
+
 	return executionRole, taskRole
+}
+
+// arnPointers converts a slice of ARN strings into the *[]*string form the
+// CDK Resources field expects.
+func arnPointers(arns []string) *[]*string {
+	ptrs := make([]*string, 0, len(arns))
+	for _, arn := range arns {
+		ptrs = append(ptrs, jsii.String(arn))
+	}
+	return &ptrs
 }
 
 // buildLogGroup creates a CloudWatch log group

@@ -1,0 +1,37 @@
+# Run the citadel-logs daemon locally.
+#
+#   docker compose -f docker-compose.logs.yml up -d
+#   open http://localhost:5500/logs
+#
+# Mount your repos read-only so the daemon can resolve each citadel.yml that
+# the registry file points at. The registry file itself lives under
+# ~/.citadel/registry.yml and references container-side paths.
+services:
+  init-db:
+    image: busybox
+    command: chown -R 65532:65532 /data
+    volumes:
+      - citadel-logs-db:/data
+
+  citadel-logs:
+    depends_on:
+      init-db:
+        condition: service_completed_successfully
+    build:
+      context: .
+      dockerfile: Dockerfile.logs
+    image: clusterbox/citadel-logs:latest
+    ports:
+      - "127.0.0.1:5500:5500"
+    volumes:
+      - ${HOME}/.aws:/home/nonroot/.aws:ro
+      - ${HOME}/.citadel:/etc/citadel:ro
+      - ${HOME}/Documents/github/clusterbox/backend:/repos:ro
+      - citadel-logs-db:/data
+    environment:
+      AWS_PROFILE: ${AWS_PROFILE:-default}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+    restart: unless-stopped
+
+volumes:
+  citadel-logs-db:

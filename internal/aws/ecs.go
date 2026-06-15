@@ -8,6 +8,7 @@ import (
 	"github.com/ClusterBox/citadel/pkg/config"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
+	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
 )
 
 // ECSClient wraps ECS operations
@@ -20,20 +21,36 @@ func (c *Client) NewECSClient() *ECSClient {
 	if c.Config.Region == "" {
 		c.Config.Region = "us-east-1"
 	}
-	
 	return &ECSClient{
 		client: ecs.NewFromConfig(c.Config),
 	}
 }
 
+// resolveCluster returns the ECS cluster name for a project. It uses the
+// explicit ecs.cluster from citadel.yml when set, otherwise falls back to the
+// "<name>-cluster" convention used by Citadel-deployed services.
+func resolveCluster(cfg *config.DeployConfig) string {
+	if cfg.ECS != nil && cfg.ECS.Cluster != "" {
+		return cfg.ECS.Cluster
+	}
+	return fmt.Sprintf("%s-cluster", cfg.Name)
+}
+
+// resolveService returns the ECS service name for a project. It uses the
+// explicit ecs.service from citadel.yml when set, otherwise falls back to the
+// "<name>-service" convention used by Citadel-deployed services.
+func resolveService(cfg *config.DeployConfig) string {
+	if cfg.ECS != nil && cfg.ECS.Service != "" {
+		return cfg.ECS.Service
+	}
+	return fmt.Sprintf("%s-service", cfg.Name)
+}
+
 // UpdateService triggers a new deployment for an ECS service
 func (ec *ECSClient) UpdateService(ctx context.Context, cfg *config.DeployConfig) error {
-	clusterName := fmt.Sprintf("%s-cluster", cfg.Name)
-	serviceName := fmt.Sprintf("%s-service", cfg.Name)
-
 	input := &ecs.UpdateServiceInput{
-		Cluster:            aws.String(clusterName),
-		Service:            aws.String(serviceName),
+		Cluster:            aws.String(resolveCluster(cfg)),
+		Service:            aws.String(resolveService(cfg)),
 		ForceNewDeployment: true,
 	}
 
@@ -55,12 +72,9 @@ func (ec *ECSClient) UpdateService(ctx context.Context, cfg *config.DeployConfig
 
 // GetServiceStatus returns the current status of an ECS service
 func (ec *ECSClient) GetServiceStatus(ctx context.Context, cfg *config.DeployConfig) error {
-	clusterName := fmt.Sprintf("%s-cluster", cfg.Name)
-	serviceName := fmt.Sprintf("%s-service", cfg.Name)
-
 	input := &ecs.DescribeServicesInput{
-		Cluster:  aws.String(clusterName),
-		Services: []string{serviceName},
+		Cluster:  aws.String(resolveCluster(cfg)),
+		Services: []string{resolveService(cfg)},
 	}
 
 	output, err := ec.client.DescribeServices(ctx, input)
@@ -85,16 +99,13 @@ func (ec *ECSClient) GetServiceStatus(ctx context.Context, cfg *config.DeployCon
 
 // WaitForStableService waits for a service to reach a stable state
 func (ec *ECSClient) WaitForStableService(ctx context.Context, cfg *config.DeployConfig) error {
-	clusterName := fmt.Sprintf("%s-cluster", cfg.Name)
-	serviceName := fmt.Sprintf("%s-service", cfg.Name)
-
 	fmt.Printf("⏳ Waiting for service to stabilize...\n")
 
 	waiter := ecs.NewServicesStableWaiter(ec.client)
-	
+
 	input := &ecs.DescribeServicesInput{
-		Cluster:  aws.String(clusterName),
-		Services: []string{serviceName},
+		Cluster:  aws.String(resolveCluster(cfg)),
+		Services: []string{resolveService(cfg)},
 	}
 
 	maxDuration := 10 * time.Minute
@@ -105,4 +116,56 @@ func (ec *ECSClient) WaitForStableService(ctx context.Context, cfg *config.Deplo
 
 	fmt.Printf("✅ Service is stable\n")
 	return nil
+}
+
+// DiscoverLogGroup resolves the CloudWatch log group an ECS service writes to
+// by inspecting its task definition's awslogs log driver. This works for any
+// running service regardless of whether Citadel deployed it.
+func (ec *ECSClient) DiscoverLogGroup(ctx context.Context, cfg *config.DeployConfig) (string, error) {
+	cluster := resolveCluster(cfg)
+	service := resolveService(cfg)
+
+	descOut, err := ec.client.DescribeServices(ctx, &ecs.DescribeServicesInput{
+		Cluster:  aws.String(cluster),
+		Services: []string{service},
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to describe service %q in cluster %q: %w", service, cluster, err)
+	}
+	if len(descOut.Services) == 0 || descOut.Services[0].TaskDefinition == nil {
+		return "", fmt.Errorf("ECS service %q not found in cluster %q; set the ecs: block in citadel.yml to point at the right cluster/service", service, cluster)
+	}
+
+	taskDefArn := descOut.Services[0].TaskDefinition
+	tdOut, err := ec.client.DescribeTaskDefinition(ctx, &ecs.DescribeTaskDefinitionInput{
+		TaskDefinition: taskDefArn,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to describe task definition %q: %w", *taskDefArn, err)
+	}
+	if tdOut.TaskDefinition == nil {
+		return "", fmt.Errorf("task definition %q not found", *taskDefArn)
+	}
+
+	group, err := extractLogGroup(tdOut.TaskDefinition.ContainerDefinitions)
+	if err != nil {
+		return "", fmt.Errorf("could not determine log group for service %q: %w", service, err)
+	}
+	return group, nil
+}
+
+// extractLogGroup returns the awslogs-group value from the first container
+// that uses the awslogs log driver. It returns an error when no container
+// declares an awslogs log group.
+func extractLogGroup(containers []ecstypes.ContainerDefinition) (string, error) {
+	for _, c := range containers {
+		lc := c.LogConfiguration
+		if lc == nil || lc.LogDriver != ecstypes.LogDriverAwslogs {
+			continue
+		}
+		if group := lc.Options["awslogs-group"]; group != "" {
+			return group, nil
+		}
+	}
+	return "", fmt.Errorf("no container uses the awslogs log driver")
 }

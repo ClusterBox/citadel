@@ -1,12 +1,24 @@
-.PHONY: build install test clean fmt vet
+.PHONY: build build-logs install install-logs test clean fmt vet docker-logs
 
 # Build the binary
 build:
 	go build -o bin/citadel ./cmd/citadel
 
+# Build the logs daemon binary
+build-logs:
+	go build -o bin/citadel-logs ./cmd/citadel-logs
+
 # Install globally
 install:
 	go install ./cmd/citadel
+
+# Install the logs daemon globally
+install-logs:
+	go install ./cmd/citadel-logs
+
+# Build the citadel-logs Docker image
+docker-logs:
+	docker build -f Dockerfile.logs -t clusterbox/citadel-logs:latest .
 
 # Run tests
 test:

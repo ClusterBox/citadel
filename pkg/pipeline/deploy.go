@@ -134,8 +134,13 @@ func Deploy(ctx context.Context, opts *DeployOptions) error {
 			tailLines = 100
 		}
 
+		logGroup, err := awsClient.NewECSClient().DiscoverLogGroup(ctx, cfg)
+		if err != nil {
+			return fmt.Errorf("failed to resolve log group: %w", err)
+		}
+
 		logsClient := awsClient.NewLogsClient()
-		return logsClient.StreamLogs(ctx, cfg, tailLines)
+		return logsClient.StreamLogs(ctx, logGroup, tailLines)
 	}
 
 	return nil
