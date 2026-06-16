@@ -1,0 +1,22 @@
+name: smaug
+region: us-east-1
+runtime: lambda
+
+# functionName is intentionally omitted: citadel applies the "<name>-<env>"
+# convention (ResolveFunctionName), resolving to smaug-dev / smaug-prod.
+# Set lambda.functionName (supports {env}) only when you need to override.
+
+environments:
+  dev:
+    account: "454066810976"
+  prod:
+    # prod account ID not yet synthesised; replace before deploying to prod.
+    account: "REPLACE_WITH_PROD_ACCOUNT_ID"
+
+# Secret env-var names synced to SSM via smaug/scripts/sync-secrets.sh.
+# Each value is stored at /smaug/<stage>/<VAR_NAME> as a SecureString.
+secrets:
+  - DATABASE_URL
+  - PAYSTACK_SECRET_KEY
+  - PAYSTACK_PUBLIC_KEY
+  - PAYSTACK_CALLBACK_URL
