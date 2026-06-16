@@ -50,16 +50,16 @@ func NewDeployableService(scope constructs.Construct, id string, props *Deployab
 	vpc := buildVPC(stack, cfg, envCfg, props.Environment)
 
 	// Build ECR repository
-	repo := buildECRRepository(stack, cfg)
+	repo := buildECRRepository(stack, cfg, props.Environment)
 
 	// Build ECS cluster
 	cluster := buildECSCluster(stack, cfg, vpc, props.Environment)
 
 	// Build IAM roles
-	executionRole, taskRole := buildIAMRoles(stack, cfg)
+	executionRole, taskRole := buildIAMRoles(stack, cfg, props.Environment)
 
 	// Build log group
-	logGroup := buildLogGroup(stack, cfg)
+	logGroup := buildLogGroup(stack, cfg, props.Environment)
 
 	// Build task definition
 	taskDef := buildTaskDefinition(stack, cfg, envCfg, executionRole, taskRole)
@@ -130,9 +130,10 @@ func buildVPC(stack awscdk.Stack, cfg *config.DeployConfig, envCfg *config.EnvCo
 	})
 }
 
-// buildECRRepository imports or references the ECR repository
-func buildECRRepository(stack awscdk.Stack, cfg *config.DeployConfig) awsecr.IRepository {
-	repoName := fmt.Sprintf("%s-repo", cfg.Name)
+// buildECRRepository imports or references the env-namespaced ECR repository
+// (e.g. legolas-dev-repo).
+func buildECRRepository(stack awscdk.Stack, cfg *config.DeployConfig, env string) awsecr.IRepository {
+	repoName := fmt.Sprintf("%s-repo", cfg.ResolvedName(env))
 	return awsecr.Repository_FromRepositoryName(stack, jsii.String("EcrRepo"), jsii.String(repoName))
 }
 
@@ -144,7 +145,7 @@ func buildECSCluster(stack awscdk.Stack, cfg *config.DeployConfig, vpc awsec2.Vp
 	}
 
 	return awsecs.NewCluster(stack, jsii.String("Cluster"), &awsecs.ClusterProps{
-		ClusterName:                    jsii.String(fmt.Sprintf("%s-cluster", cfg.Name)),
+		ClusterName:                    jsii.String(fmt.Sprintf("%s-cluster", cfg.ResolvedName(env))),
 		Vpc:                            vpc,
 		ContainerInsightsV2:            containerInsights,
 		EnableFargateCapacityProviders: jsii.Bool(true),
@@ -152,7 +153,7 @@ func buildECSCluster(stack awscdk.Stack, cfg *config.DeployConfig, vpc awsec2.Vp
 }
 
 // buildIAMRoles creates execution and task roles
-func buildIAMRoles(stack awscdk.Stack, cfg *config.DeployConfig) (awsiam.Role, awsiam.Role) {
+func buildIAMRoles(stack awscdk.Stack, cfg *config.DeployConfig, env string) (awsiam.Role, awsiam.Role) {
 	// Execution role (for pulling images and accessing secrets)
 	executionRole := awsiam.NewRole(stack, jsii.String("TaskExecutionRole"), &awsiam.RoleProps{
 		AssumedBy: awsiam.NewServicePrincipal(jsii.String("ecs-tasks.amazonaws.com"), nil),
@@ -165,7 +166,7 @@ func buildIAMRoles(stack awscdk.Stack, cfg *config.DeployConfig) (awsiam.Role, a
 	executionRole.AddToPolicy(awsiam.NewPolicyStatement(&awsiam.PolicyStatementProps{
 		Actions: jsii.Strings("ssm:GetParameters", "ssm:GetParameter"),
 		Resources: jsii.Strings(
-			fmt.Sprintf("arn:aws:ssm:*:*:parameter/%s/*", cfg.Name),
+			fmt.Sprintf("arn:aws:ssm:*:*:parameter/%s/*", cfg.ResolvedName(env)),
 		),
 	}))
 
@@ -211,10 +212,10 @@ func arnPointers(arns []string) *[]*string {
 	return &ptrs
 }
 
-// buildLogGroup creates a CloudWatch log group
-func buildLogGroup(stack awscdk.Stack, cfg *config.DeployConfig) awslogs.LogGroup {
+// buildLogGroup creates an env-namespaced CloudWatch log group (e.g. /ecs/legolas-dev)
+func buildLogGroup(stack awscdk.Stack, cfg *config.DeployConfig, env string) awslogs.LogGroup {
 	return awslogs.NewLogGroup(stack, jsii.String("LogGroup"), &awslogs.LogGroupProps{
-		LogGroupName:  jsii.String(fmt.Sprintf("/ecs/%s", cfg.Name)),
+		LogGroupName:  jsii.String(fmt.Sprintf("/ecs/%s", cfg.ResolvedName(env))),
 		Retention:     awslogs.RetentionDays_ONE_WEEK,
 		RemovalPolicy: awscdk.RemovalPolicy_DESTROY,
 	})
@@ -243,7 +244,7 @@ func buildContainer(stack awscdk.Stack, cfg *config.DeployConfig, envCfg *config
 			stack,
 			jsii.String(fmt.Sprintf("Param-%s", secretName)),
 			&awsssm.SecureStringParameterAttributes{
-				ParameterName: jsii.String(fmt.Sprintf("/%s/%s", cfg.Name, secretName)),
+				ParameterName: jsii.String(fmt.Sprintf("/%s/%s", cfg.ResolvedName(env), secretName)),
 			},
 		)
 		secrets[secretName] = awsecs.Secret_FromSsmParameter(param)
@@ -255,9 +256,19 @@ func buildContainer(stack awscdk.Stack, cfg *config.DeployConfig, envCfg *config
 	environment["SERVICE_NAME"] = jsii.String(cfg.Name)
 	environment["ENVIRONMENT"] = jsii.String(env)
 
+	// Resolve the image tag from the "imageTag" CDK context. Deploys pass the
+	// git SHA so each deploy registers an immutable, rollback-able task def
+	// revision; absent context (e.g. local synth) falls back to "latest".
+	imageTag := "latest"
+	if ctxTag := stack.Node().TryGetContext(jsii.String("imageTag")); ctxTag != nil {
+		if s, ok := ctxTag.(string); ok && s != "" {
+			imageTag = s
+		}
+	}
+
 	// Add container
 	container := taskDef.AddContainer(jsii.String("AppContainer"), &awsecs.ContainerDefinitionOptions{
-		Image:       awsecs.ContainerImage_FromEcrRepository(repo, jsii.String("latest")),
+		Image:       awsecs.ContainerImage_FromEcrRepository(repo, jsii.String(imageTag)),
 		Essential:   jsii.Bool(true),
 		Secrets:     &secrets,
 		Environment: &environment,
@@ -321,7 +332,7 @@ func buildFargateService(stack awscdk.Stack, cfg *config.DeployConfig, envCfg *c
 		Cluster:                    cluster,
 		TaskDefinition:             taskDef,
 		DesiredCount:               jsii.Number(float64(envCfg.MinCapacity)),
-		ServiceName:                jsii.String(fmt.Sprintf("%s-service", cfg.Name)),
+		ServiceName:                jsii.String(fmt.Sprintf("%s-service", cfg.ResolvedName(env))),
 		AssignPublicIp:             jsii.Bool(assignPublicIP),
 		PublicLoadBalancer:         jsii.Bool(true),
 		CapacityProviderStrategies: capacityProviderStrategies,

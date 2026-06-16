@@ -33,7 +33,7 @@ func Deploy(ctx context.Context, opts *DeployOptions) error {
 	// 1. Load config
 	fmt.Printf("🏰 Citadel Deploy Pipeline\n\n")
 	fmt.Printf("📋 Loading configuration from %s...\n", opts.ConfigPath)
-	
+
 	cfg, err := config.Load(opts.ConfigPath)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
@@ -60,7 +60,7 @@ func Deploy(ctx context.Context, opts *DeployOptions) error {
 			return fmt.Errorf("failed to create AWS client: %w", err)
 		}
 
-		result, err := awsClient.SyncSecrets(ctx, cfg, opts.EnvFile, opts.DryRun)
+		result, err := awsClient.SyncSecrets(ctx, cfg, opts.Environment, opts.EnvFile, opts.DryRun)
 		if err != nil {
 			return fmt.Errorf("failed to sync secrets: %w", err)
 		}
@@ -79,22 +79,22 @@ func Deploy(ctx context.Context, opts *DeployOptions) error {
 	// 3. Deploy CDK infrastructure (if requested)
 	if opts.DeployInfra {
 		fmt.Printf("🏗️  Deploying CDK infrastructure...\n")
-		
+
 		if err := deployCDK(ctx, cfg, opts); err != nil {
 			return fmt.Errorf("failed to deploy CDK infrastructure: %w", err)
 		}
-		
+
 		fmt.Printf("✅ Infrastructure deployed\n\n")
 	}
 
 	// 4. Build and push Docker image
 	fmt.Printf("🐳 Building Docker image...\n")
-	
+
 	imageTag, err := buildAndPushImage(ctx, cfg, opts)
 	if err != nil {
 		return fmt.Errorf("failed to build/push image: %w", err)
 	}
-	
+
 	fmt.Printf("✅ Image pushed: %s\n\n", imageTag)
 
 	// 5. Update the running service (runtime-specific) and record the deploy.
@@ -141,7 +141,7 @@ func Deploy(ctx context.Context, opts *DeployOptions) error {
 			tailLines = 100
 		}
 
-		logGroup, err := awsClient.NewECSClient().DiscoverLogGroup(ctx, cfg)
+		logGroup, err := awsClient.NewECSClient().DiscoverLogGroup(ctx, cfg, opts.Environment)
 		if err != nil {
 			return fmt.Errorf("failed to resolve log group: %w", err)
 		}
@@ -164,9 +164,18 @@ func deployCDK(ctx context.Context, cfg *config.DeployConfig, opts *DeployOption
 		return fmt.Errorf("CDK directory not found: %s", cdkDir)
 	}
 
+	// Pin the rolled task definition to the immutable <sha> image instead of
+	// :latest, matching the construct's imageTag context. The same SHA tags the
+	// image pushed in buildAndPushImage (same commit, same value).
+	gitSHA, err := getGitSHA()
+	if err != nil {
+		return fmt.Errorf("failed to get git SHA: %w", err)
+	}
+
 	// Run cdk deploy
 	cmd := exec.CommandContext(ctx, "cdk", "deploy",
 		"--context", fmt.Sprintf("env=%s", opts.Environment),
+		"--context", fmt.Sprintf("imageTag=%s", gitSHA),
 		"--require-approval", "never",
 	)
 	cmd.Dir = cdkDir
@@ -174,7 +183,7 @@ func deployCDK(ctx context.Context, cfg *config.DeployConfig, opts *DeployOption
 	cmd.Stderr = os.Stderr
 
 	if opts.DryRun {
-		fmt.Printf("   [dry-run] Would run: cdk deploy --context env=%s\n", opts.Environment)
+		fmt.Printf("   [dry-run] Would run: cdk deploy --context env=%s --context imageTag=%s\n", opts.Environment, gitSHA)
 		return nil
 	}
 
@@ -203,7 +212,7 @@ func buildAndPushImage(ctx context.Context, cfg *config.DeployConfig, opts *Depl
 
 	// Determine context path (directory containing citadel.yml)
 	contextPath := filepath.Dir(opts.ConfigPath)
-	
+
 	// Get AWS account ID
 	awsClient, err := aws.NewClient(ctx, cfg.Region)
 	if err != nil {
@@ -215,8 +224,9 @@ func buildAndPushImage(ctx context.Context, cfg *config.DeployConfig, opts *Depl
 		return "", fmt.Errorf("failed to get AWS account ID: %w", err)
 	}
 
-	// Build image tags
-	repoName := fmt.Sprintf("%s-repo", cfg.Name)
+	// Build image tags. The ECR repo is env-namespaced ("<name>-<env>-repo") so
+	// dev and prod images stay isolated, matching the CDK construct.
+	repoName := fmt.Sprintf("%s-repo", cfg.ResolvedName(opts.Environment))
 	ecrURI := fmt.Sprintf("%s.dkr.ecr.%s.amazonaws.com/%s", accountID, cfg.Region, repoName)
 	imageTag := fmt.Sprintf("%s:%s", repoName, gitSHA)
 	imageURI := fmt.Sprintf("%s:%s", ecrURI, gitSHA)
@@ -289,7 +299,7 @@ func resolveTarget(cfg *config.DeployConfig, env string) string {
 	if cfg.ECS != nil && cfg.ECS.Service != "" {
 		return cfg.ECS.Service
 	}
-	return fmt.Sprintf("%s-service", cfg.Name)
+	return fmt.Sprintf("%s-service", cfg.ResolvedName(env))
 }
 
 // deployRecorder opens the local deployment-history DB and returns a finish

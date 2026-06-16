@@ -19,8 +19,11 @@ type SyncResult struct {
 	Missing []string
 }
 
-// SyncSecrets synchronizes secrets from .env file to SSM Parameter Store
-func (c *Client) SyncSecrets(ctx context.Context, cfg *config.DeployConfig, envFile string, dryRun bool) (*SyncResult, error) {
+// SyncSecrets synchronizes secrets from .env file to the env-namespaced SSM
+// prefix "/<name>-<envName>/<KEY>" (see DeployConfig.ResolvedName), so dev and
+// prod secrets stay isolated even when they share one AWS account. The envName
+// parameter is named to avoid shadowing the imported "env" package below.
+func (c *Client) SyncSecrets(ctx context.Context, cfg *config.DeployConfig, envName, envFile string, dryRun bool) (*SyncResult, error) {
 	// Load environment variables from file
 	envVars, err := env.Load(envFile)
 	if err != nil {
@@ -38,7 +41,7 @@ func (c *Client) SyncSecrets(ctx context.Context, cfg *config.DeployConfig, envF
 	// Sync each secret to SSM
 	for _, secretName := range cfg.Secrets {
 		value := envVars[secretName]
-		paramName := fmt.Sprintf("/%s/%s", cfg.Name, secretName)
+		paramName := secretParamName(cfg, envName, secretName)
 
 		// Get existing parameter value if it exists
 		existing, err := c.getParameter(ctx, paramName)
@@ -63,6 +66,13 @@ func (c *Client) SyncSecrets(ctx context.Context, cfg *config.DeployConfig, envF
 	}
 
 	return result, nil
+}
+
+// secretParamName builds the env-namespaced SSM parameter path for a secret:
+// "/<name>-<envName>/<KEY>" (e.g. /legolas-dev/DATABASE_URL). Keeping this in
+// one place means the convention matches the CDK construct's SSM prefix.
+func secretParamName(cfg *config.DeployConfig, envName, secretName string) string {
+	return fmt.Sprintf("/%s/%s", cfg.ResolvedName(envName), secretName)
 }
 
 // getParameter retrieves a parameter value from SSM

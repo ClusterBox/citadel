@@ -54,55 +54,20 @@ func (c *Client) NewLogsClient() *LogsClient {
 	}
 }
 
-// StreamLogs tails CloudWatch logs for the given log group
+// StreamLogs tails CloudWatch logs for the given log group.
+//
+// It uses FilterLogEvents, which spans every stream in the group, so streams
+// created after tailing starts (e.g. the new task started by a deploy) are
+// picked up automatically — unlike a fixed per-stream poll, which silently goes
+// stale once the running task rotates.
 func (lc *LogsClient) StreamLogs(ctx context.Context, logGroupName string, tailLines int) error {
-	// Get the most recent log streams
-	streamsOutput, err := lc.client.DescribeLogStreams(ctx, &cloudwatchlogs.DescribeLogStreamsInput{
-		LogGroupName: aws.String(logGroupName),
-		OrderBy:      "LastEventTime",
-		Descending:   aws.Bool(true),
-		Limit:        aws.Int32(5),
-	})
-	if err != nil {
-		return fmt.Errorf("failed to describe log streams: %w", err)
-	}
-
-	if len(streamsOutput.LogStreams) == 0 {
-		return fmt.Errorf("no log streams found in %s", logGroupName)
-	}
-
-	// Start time: look back far enough to get tailLines
-	startTime := time.Now().Add(-30 * time.Minute).UnixMilli()
-
-	// Collect stream names
-	var streamNames []string
-	for _, stream := range streamsOutput.LogStreams {
-		streamNames = append(streamNames, *stream.LogStreamName)
-	}
-
-	// Print initial batch of recent events
 	fmt.Printf("--- Log group: %s ---\n", logGroupName)
-	fmt.Printf("--- Streams: %d active ---\n\n", len(streamNames))
+	fmt.Printf("--- Live tailing (Ctrl+C to exit) ---\n\n")
 
-	nextTokens := make(map[string]*string)
-
-	// Fetch initial events from each stream
-	for _, streamName := range streamNames {
-		events, nextToken, err := lc.getLogEvents(ctx, logGroupName, streamName, startTime, nil)
-		if err != nil {
-			fmt.Printf("Warning: failed to read stream %s: %v\n", streamName, err)
-			continue
-		}
-		nextTokens[streamName] = nextToken
-
-		for _, event := range events {
-			ts := time.UnixMilli(*event.Timestamp)
-			fmt.Printf("[%s] %s\n", ts.Format("15:04:05"), *event.Message)
-		}
-	}
-
-	// Live tail loop
-	fmt.Printf("\n--- Live tailing (Ctrl+C to exit) ---\n\n")
+	// Look back over a recent window for the initial batch, then advance the
+	// cursor strictly forward as events arrive. cursor is the inclusive lower
+	// bound (epoch ms) for the next FilterLogEvents query.
+	cursor := time.Now().Add(-30 * time.Minute).UnixMilli()
 
 	for {
 		select {
@@ -111,25 +76,53 @@ func (lc *LogsClient) StreamLogs(ctx context.Context, logGroupName string, tailL
 		default:
 		}
 
-		hasNew := false
-		for _, streamName := range streamNames {
-			events, nextToken, err := lc.getLogEvents(ctx, logGroupName, streamName, 0, nextTokens[streamName])
-			if err != nil {
-				continue
-			}
-			nextTokens[streamName] = nextToken
-
-			for _, event := range events {
-				ts := time.UnixMilli(*event.Timestamp)
-				fmt.Printf("[%s] %s\n", ts.Format("15:04:05"), *event.Message)
-				hasNew = true
-			}
-		}
-
-		if !hasNew {
+		// EndTime is exclusive; +1 includes events at exactly "now".
+		end := time.Now().UnixMilli() + 1
+		if end <= cursor {
 			time.Sleep(2 * time.Second)
+			continue
 		}
+
+		newest, err := lc.printWindow(ctx, logGroupName, cursor, end)
+		if err != nil {
+			// Transient (throttling, etc.) — retry next tick without advancing
+			// the cursor so nothing is skipped.
+			time.Sleep(2 * time.Second)
+			continue
+		}
+		// Advance past the newest event printed so it isn't repeated.
+		if newest >= cursor {
+			cursor = newest + 1
+		}
+		time.Sleep(2 * time.Second)
 	}
+}
+
+// printWindow fetches and prints every event in [startMs, endMs) across all
+// streams in the group, paginating as needed, and returns the largest event
+// timestamp seen (or startMs-1 when the window is empty).
+func (lc *LogsClient) printWindow(ctx context.Context, logGroup string, startMs, endMs int64) (int64, error) {
+	newest := startMs - 1
+	var nextToken *string
+	const pageCap = 50 // safety bound on pages per tick
+	for pages := 0; pages < pageCap; pages++ {
+		page, err := lc.FilterEvents(ctx, logGroup, startMs, endMs, 0, nextToken)
+		if err != nil {
+			return newest, err
+		}
+		for _, e := range page.Events {
+			ts := aws.ToInt64(e.Timestamp)
+			fmt.Printf("[%s] %s\n", time.UnixMilli(ts).Format("15:04:05"), aws.ToString(e.Message))
+			if ts > newest {
+				newest = ts
+			}
+		}
+		if page.NextToken == nil {
+			break
+		}
+		nextToken = page.NextToken
+	}
+	return newest, nil
 }
 
 // getLogEvents fetches log events from a specific stream
