@@ -34,8 +34,8 @@ type DeployConfig struct {
 	CloudFront   *CloudFrontConfig    `yaml:"cloudfront,omitempty"`
 }
 
-// LambdaConfig declares Lambda-specific metadata used by the logs daemon.
-// Required when runtime: lambda.
+// LambdaConfig declares Lambda-specific metadata. functionName is optional;
+// when absent ResolveFunctionName applies the "<name>-<env>" convention.
 type LambdaConfig struct {
 	FunctionName string `yaml:"functionName"`
 }
@@ -46,6 +46,17 @@ func (c *DeployConfig) ResolvedRuntime() Runtime {
 		return RuntimeECS
 	}
 	return c.Runtime
+}
+
+// ResolveFunctionName returns the Lambda function name for env. When
+// lambda.functionName is set it is used verbatim with "{env}" substituted;
+// otherwise the "<name>-<env>" convention is used (e.g. smaug-dev), mirroring
+// the ECS "<name>-cluster"/"<name>-service" conventions. env must be non-empty.
+func (c *DeployConfig) ResolveFunctionName(env string) string {
+	if c.Lambda != nil && c.Lambda.FunctionName != "" {
+		return strings.ReplaceAll(c.Lambda.FunctionName, "{env}", env)
+	}
+	return fmt.Sprintf("%s-%s", c.Name, env)
 }
 
 // ECSConfig overrides how Citadel locates an existing ECS service. When unset,
@@ -113,8 +124,8 @@ func Load(path string) (*DeployConfig, error) {
 }
 
 // Validate checks if the config is valid for the citadel deploy pipeline.
-// Lambda-runtime configs skip ECS-only field requirements but still must
-// declare a function name.
+// Lambda-runtime configs skip ECS-only field requirements; functionName is
+// optional (ResolveFunctionName applies the "<name>-<env>" convention when unset).
 func (c *DeployConfig) Validate() error {
 	if c.Name == "" {
 		return fmt.Errorf("name is required")
@@ -140,8 +151,10 @@ func (c *DeployConfig) Validate() error {
 			return fmt.Errorf("at least one secret is required")
 		}
 	case RuntimeLambda:
-		if c.Lambda == nil || c.Lambda.FunctionName == "" {
-			return fmt.Errorf("lambda.functionName is required when runtime: lambda")
+		// functionName is optional: when unset we use the "<name>-<env>"
+		// convention (see ResolveFunctionName).
+		if len(c.Environments) == 0 {
+			return fmt.Errorf("at least one environment is required")
 		}
 	default:
 		return fmt.Errorf("runtime %q: must be %q or %q", c.Runtime, RuntimeECS, RuntimeLambda)

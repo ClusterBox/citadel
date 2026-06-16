@@ -1,0 +1,29 @@
+# Adoption caveat: smaug's CDK defines the function with
+# DockerImageCode.fromImageAsset, so CDK owns the function's image. Once citadel
+# drives app deploys (build/push -> lambda UpdateFunctionCode against smaug-repo),
+# a later `cdk deploy` will revert the function image. Use CDK / --deploy-infra
+# for infrastructure only and let citadel own code updates (same split as ECS).
+# Prerequisites: a smaug-repo ECR repository and an existing smaug-<env> function.
+
+name: smaug
+region: us-east-1
+runtime: lambda
+
+# functionName is intentionally omitted: citadel applies the "<name>-<env>"
+# convention (ResolveFunctionName), resolving to smaug-dev / smaug-prod.
+# Set lambda.functionName (supports {env}) only when you need to override.
+
+environments:
+  dev:
+    account: "454066810976"
+  prod:
+    # prod account ID not yet synthesised; replace before deploying to prod.
+    account: "REPLACE_WITH_PROD_ACCOUNT_ID"
+
+# Secret env-var names synced to SSM via smaug/scripts/sync-secrets.sh.
+# Each value is stored at /smaug/<stage>/<VAR_NAME> as a SecureString.
+secrets:
+  - DATABASE_URL
+  - PAYSTACK_SECRET_KEY
+  - PAYSTACK_PUBLIC_KEY
+  - PAYSTACK_CALLBACK_URL

@@ -20,7 +20,7 @@ func newTestServer(t *testing.T) (*Server, *logsdb.DB) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
-	srv, err := New(db)
+	srv, err := New(db, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

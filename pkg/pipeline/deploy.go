@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 
 	"github.com/ClusterBox/citadel/internal/aws"
+	"github.com/ClusterBox/citadel/internal/deploydb"
 	"github.com/ClusterBox/citadel/internal/docker"
 	"github.com/ClusterBox/citadel/pkg/config"
 )
@@ -23,6 +25,7 @@ type DeployOptions struct {
 	StreamLogs  bool
 	Wait        bool
 	TailLines   int
+	Message     string
 }
 
 // Deploy executes the full deployment pipeline
@@ -94,27 +97,31 @@ func Deploy(ctx context.Context, opts *DeployOptions) error {
 	
 	fmt.Printf("✅ Image pushed: %s\n\n", imageTag)
 
-	// 5. Update ECS service
+	// 5. Update the running service (runtime-specific) and record the deploy.
 	if !opts.DryRun {
-		fmt.Printf("🚀 Deploying to ECS...\n")
-		
+		runtime := cfg.ResolvedRuntime()
+		fmt.Printf("🚀 Deploying to %s...\n", runtime)
+
 		awsClient, err := aws.NewClient(ctx, cfg.Region)
 		if err != nil {
 			return fmt.Errorf("failed to create AWS client: %w", err)
 		}
 
-		ecsClient := awsClient.NewECSClient()
-		if err := ecsClient.UpdateService(ctx, cfg); err != nil {
-			return fmt.Errorf("failed to update ECS service: %w", err)
-		}
+		target := resolveTarget(cfg, opts.Environment)
+		finish := deployRecorder(ctx, cfg, opts, imageTag, target)
 
-		// Wait for stable if requested
+		deployer := selectDeployer(cfg, awsClient)
+		if err := deployer.Update(ctx, cfg, opts.Environment, imageTag); err != nil {
+			finish(err)
+			return fmt.Errorf("failed to update %s: %w", runtime, err)
+		}
 		if opts.Wait {
-			if err := ecsClient.WaitForStableService(ctx, cfg); err != nil {
-				return fmt.Errorf("service did not stabilize: %w", err)
+			if err := deployer.WaitStable(ctx, cfg, opts.Environment); err != nil {
+				finish(err)
+				return fmt.Errorf("deployment did not stabilize: %w", err)
 			}
 		}
-		
+		finish(nil)
 		fmt.Printf("\n")
 	}
 
@@ -271,4 +278,63 @@ func getAWSAccountID(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return string(output[:len(output)-1]), nil // Remove trailing newline
+}
+
+// resolveTarget returns the human-facing deploy target: the Lambda function
+// name for lambda runtime, otherwise the ECS service name.
+func resolveTarget(cfg *config.DeployConfig, env string) string {
+	if cfg.ResolvedRuntime() == config.RuntimeLambda {
+		return cfg.ResolveFunctionName(env)
+	}
+	if cfg.ECS != nil && cfg.ECS.Service != "" {
+		return cfg.ECS.Service
+	}
+	return fmt.Sprintf("%s-service", cfg.Name)
+}
+
+// deployRecorder opens the local deployment-history DB and returns a finish
+// func that marks the deploy success or failed. All failures degrade
+// gracefully (warn, no-op) so history never blocks a deploy.
+func deployRecorder(ctx context.Context, cfg *config.DeployConfig, opts *DeployOptions, imageURI, target string) func(err error) {
+	noop := func(error) {}
+	dbPath, err := deploydb.DefaultPath()
+	if err != nil {
+		fmt.Printf("   ⚠️  deployment history disabled: %v\n", err)
+		return noop
+	}
+	db, err := deploydb.Open(dbPath)
+	if err != nil {
+		fmt.Printf("   ⚠️  deployment history disabled: %v\n", err)
+		return noop
+	}
+
+	who := "unknown"
+	if u, uerr := user.Current(); uerr == nil {
+		who = u.Username
+	}
+	gitSHA, _ := getGitSHA()
+
+	id, err := db.Insert(ctx, deploydb.Deployment{
+		Project: cfg.Name, Env: opts.Environment, Runtime: string(cfg.ResolvedRuntime()),
+		Region: cfg.Region, GitSHA: gitSHA, ImageURI: imageURI, Message: opts.Message,
+		DeployedBy: who, Target: target,
+	})
+	if err != nil {
+		fmt.Printf("   ⚠️  could not record deployment: %v\n", err)
+		db.Close()
+		return noop
+	}
+
+	return func(deployErr error) {
+		defer db.Close()
+		// Detach from ctx: on a failed/timed-out deploy the original context is
+		// often already cancelled, which would make the mark statements no-op
+		// and leave the row stuck at in_progress forever.
+		markCtx := context.WithoutCancel(ctx)
+		if deployErr != nil {
+			_ = db.MarkFailed(markCtx, id, deployErr.Error())
+			return
+		}
+		_ = db.MarkSuccess(markCtx, id)
+	}
 }
