@@ -26,6 +26,15 @@ func (c *Client) NewECSClient() *ECSClient {
 	}
 }
 
+// TODO(env-namespacing): This CLI deploy path still resolves cluster/service/SSM
+// names from bare cfg.Name and is NOT env-aware. The CDK construct
+// (pkg/constructs/deployable) now names ECS resources "<name>-<env>" (e.g.
+// legolas-dev-cluster) via DeployConfig.ResolvedName so dev and prod stay
+// isolated in a single AWS account. This deployer must be threaded with env
+// (Deployer.Update/WaitStable already receive it) and switched to
+// cfg.ResolvedName(env) before it can deploy env-namespaced services; until
+// then `citadel deploy` will target the wrong (un-namespaced) resources.
+//
 // resolveCluster returns the ECS cluster name for a project. It uses the
 // explicit ecs.cluster from citadel.yml when set, otherwise falls back to the
 // "<name>-cluster" convention used by Citadel-deployed services.

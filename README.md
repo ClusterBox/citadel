@@ -17,7 +17,6 @@ Deploying ECS applications involves managing configuration across multiple files
 - Duplicate secret definitions in CDK code
 - Infrastructure config scattered across multiple files
 
-When you add a new secret (e.g. `INSTAGRAM_APP_ID`), you must update multiple places manually. Miss one and the ECS task fails with cryptic errors, potentially leaving your CloudFormation stack in `UPDATE_ROLLBACK_FAILED` state.
 
 ## The Solution
 
@@ -48,12 +47,12 @@ citadel deploy --env dev --deploy-infra
 ## citadel-logs daemon
 
 Citadel ships a separate always-on binary, `citadel-logs`, that watches
-CloudWatch log groups for every registered clusterbox service and surfaces
+CloudWatch log groups for every registered  service and surfaces
 500-class errors at <http://localhost:5500/logs>.
 
 It works across runtimes:
 
-- `runtime: ecs` (default) — clusterbox NestJS backends like Aragorn / gollum.
+- `runtime: ecs` (default)  NestJS backends
 - `runtime: lambda` — clusterbox Go Lambdas like smaug. Requires a
   `lambda: { functionName: ... }` block.
 
@@ -64,7 +63,7 @@ It works across runtimes:
 make docker-logs
 
 # 2. Register a repo
-cd ~/Documents/github/clusterbox/backend/Aragorn
+cd ~/Documents/github/my-backend
 citadel logs-daemon register --env dev
 
 # 3. Start the daemon
@@ -76,9 +75,7 @@ open http://localhost:5500/logs
 
 The daemon polls each service's CloudWatch log group every 10s, persists
 500-class events to SQLite (`/data/citadel-logs.db`), retains them for 7 days,
-and hot-reloads the registry on change. See
-[`docs/superpowers/specs/2026-06-09-citadel-logs-daemon-design.md`](docs/superpowers/specs/2026-06-09-citadel-logs-daemon-design.md)
-for the full design.
+and hot-reloads the registry on change.
 
 ## Roadmap
 
