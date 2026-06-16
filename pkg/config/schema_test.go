@@ -114,6 +114,16 @@ func TestResolveFunctionName(t *testing.T) {
 	}
 }
 
+func TestResolvedName(t *testing.T) {
+	cfg := &DeployConfig{Name: "legolas"}
+	if got := cfg.ResolvedName("dev"); got != "legolas-dev" {
+		t.Errorf("dev: got %q, want legolas-dev", got)
+	}
+	if got := cfg.ResolvedName("prod"); got != "legolas-prod" {
+		t.Errorf("prod: got %q, want legolas-prod", got)
+	}
+}
+
 func TestValidateLambdaWithoutFunctionName(t *testing.T) {
 	cfg := &DeployConfig{
 		Name:    "smaug",

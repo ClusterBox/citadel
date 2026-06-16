@@ -48,10 +48,19 @@ func (c *DeployConfig) ResolvedRuntime() Runtime {
 	return c.Runtime
 }
 
+// ResolvedName returns the env-namespaced base name for a deployment
+// ("<name>-<env>", e.g. legolas-dev). All per-environment ECS resources
+// (ECR repo, cluster, service, log group, SSM prefix) are derived from this so
+// that dev and prod stay isolated even when they share one AWS account.
+// env must be non-empty.
+func (c *DeployConfig) ResolvedName(env string) string {
+	return fmt.Sprintf("%s-%s", c.Name, env)
+}
+
 // ResolveFunctionName returns the Lambda function name for env. When
 // lambda.functionName is set it is used verbatim with "{env}" substituted;
-// otherwise the "<name>-<env>" convention is used (e.g. smaug-dev), mirroring
-// the ECS "<name>-cluster"/"<name>-service" conventions. env must be non-empty.
+// otherwise the "<name>-<env>" convention is used (e.g. smaug-dev), matching
+// the ECS resource naming convention (see ResolvedName). env must be non-empty.
 func (c *DeployConfig) ResolveFunctionName(env string) string {
 	if c.Lambda != nil && c.Lambda.FunctionName != "" {
 		return strings.ReplaceAll(c.Lambda.FunctionName, "{env}", env)

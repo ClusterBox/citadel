@@ -70,29 +70,37 @@ func TestExtractLogGroup_EmptyContainersFails(t *testing.T) {
 }
 
 func TestResolveCluster_UsesExplicitECSBlock(t *testing.T) {
+	// An explicit ecs.cluster override wins regardless of env (adopting
+	// non-Citadel resources): no env suffix is applied.
 	cfg := &config.DeployConfig{Name: "ahadi-backend", ECS: &config.ECSConfig{Cluster: "ahadi-cluster"}}
-	if got := resolveCluster(cfg); got != "ahadi-cluster" {
+	if got := resolveCluster(cfg, "dev"); got != "ahadi-cluster" {
 		t.Fatalf("expected ahadi-cluster, got %q", got)
 	}
 }
 
-func TestResolveCluster_FallsBackToConvention(t *testing.T) {
+func TestResolveCluster_FallsBackToEnvNamespacedConvention(t *testing.T) {
 	cfg := &config.DeployConfig{Name: "legolas"}
-	if got := resolveCluster(cfg); got != "legolas-cluster" {
-		t.Fatalf("expected legolas-cluster, got %q", got)
+	if got := resolveCluster(cfg, "dev"); got != "legolas-dev-cluster" {
+		t.Fatalf("expected legolas-dev-cluster, got %q", got)
+	}
+	if got := resolveCluster(cfg, "prod"); got != "legolas-prod-cluster" {
+		t.Fatalf("expected legolas-prod-cluster, got %q", got)
 	}
 }
 
 func TestResolveService_UsesExplicitECSBlock(t *testing.T) {
 	cfg := &config.DeployConfig{Name: "ahadi-backend", ECS: &config.ECSConfig{Service: "ahadi-backend"}}
-	if got := resolveService(cfg); got != "ahadi-backend" {
+	if got := resolveService(cfg, "dev"); got != "ahadi-backend" {
 		t.Fatalf("expected ahadi-backend, got %q", got)
 	}
 }
 
-func TestResolveService_FallsBackToConvention(t *testing.T) {
+func TestResolveService_FallsBackToEnvNamespacedConvention(t *testing.T) {
 	cfg := &config.DeployConfig{Name: "legolas"}
-	if got := resolveService(cfg); got != "legolas-service" {
-		t.Fatalf("expected legolas-service, got %q", got)
+	if got := resolveService(cfg, "dev"); got != "legolas-dev-service" {
+		t.Fatalf("expected legolas-dev-service, got %q", got)
+	}
+	if got := resolveService(cfg, "prod"); got != "legolas-prod-service" {
+		t.Fatalf("expected legolas-prod-service, got %q", got)
 	}
 }
