@@ -2,10 +2,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
 
 	"github.com/ClusterBox/citadel/internal/aws"
+	"github.com/ClusterBox/citadel/internal/deploydb"
+	"github.com/ClusterBox/citadel/internal/webui"
 	"github.com/ClusterBox/citadel/pkg/config"
 	"github.com/ClusterBox/citadel/pkg/pipeline"
 	"github.com/spf13/cobra"
@@ -238,6 +242,38 @@ Single source of truth: citadel.yml defines everything about your deployment.`,
 
 	logsCmd.Flags().Int("tail", 100, "Number of log lines to show initially")
 
+	// dashboard command — local deployment-history web UI
+	dashboardCmd := &cobra.Command{
+		Use:   "dashboard",
+		Short: "Serve the local deployment-history dashboard",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			addr, _ := cmd.Flags().GetString("addr")
+
+			dbPath, err := deploydb.DefaultPath()
+			if err != nil {
+				return err
+			}
+			db, err := deploydb.Open(dbPath)
+			if err != nil {
+				return fmt.Errorf("open deployments db: %w", err)
+			}
+			defer db.Close()
+
+			srv, err := webui.NewDeployServer(db)
+			if err != nil {
+				return err
+			}
+
+			httpSrv := &http.Server{Addr: addr, Handler: srv.Handler()}
+			fmt.Printf("🏰 Deployments dashboard: http://%s/deployments\n", addr)
+			if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				return err
+			}
+			return nil
+		},
+	}
+	dashboardCmd.Flags().String("addr", "localhost:5500", "Address to serve the dashboard on")
+
 	// Add commands
 	rootCmd.AddCommand(deployCmd)
 	rootCmd.AddCommand(syncSecretsCmd)
@@ -245,6 +281,7 @@ Single source of truth: citadel.yml defines everything about your deployment.`,
 	rootCmd.AddCommand(statusCmd)
 	rootCmd.AddCommand(logsCmd)
 	rootCmd.AddCommand(newLogsDaemonCmd())
+	rootCmd.AddCommand(dashboardCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
