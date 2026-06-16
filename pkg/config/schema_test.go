@@ -64,17 +64,20 @@ func TestValidate_MalformedConsumeArnFails(t *testing.T) {
 }
 
 func TestValidate_LambdaRuntimeRequiresFunctionName(t *testing.T) {
+	// functionName is now optional for lambda (convention-based); missing
+	// environments should still be caught.
 	cfg := &DeployConfig{
 		Name:    "smaug",
 		Region:  "us-east-1",
 		Runtime: RuntimeLambda,
+		// No Environments — should fail.
 	}
 	err := cfg.Validate()
 	if err == nil {
-		t.Fatal("expected error for missing lambda.functionName, got nil")
+		t.Fatal("expected error for missing environments on lambda runtime, got nil")
 	}
-	if got := err.Error(); !strings.Contains(got, "lambda.functionName") {
-		t.Fatalf("expected error to mention lambda.functionName, got %q", got)
+	if got := err.Error(); !strings.Contains(got, "environment") {
+		t.Fatalf("expected error to mention environment, got %q", got)
 	}
 }
 
@@ -84,9 +87,44 @@ func TestValidate_LambdaRuntimeSkipsContainerFields(t *testing.T) {
 		Region:  "us-east-1",
 		Runtime: RuntimeLambda,
 		Lambda:  &LambdaConfig{FunctionName: "SmaugFn"},
+		Environments: map[string]EnvConfig{
+			"dev": {Account: "123456789012"},
+		},
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("expected nil error for lambda runtime, got %v", err)
+	}
+}
+
+func TestResolveFunctionName(t *testing.T) {
+	// convention default: <name>-<env>
+	cfg := &DeployConfig{Name: "smaug"}
+	if got := cfg.ResolveFunctionName("dev"); got != "smaug-dev" {
+		t.Errorf("convention: got %q, want smaug-dev", got)
+	}
+	// explicit name wins
+	cfg.Lambda = &LambdaConfig{FunctionName: "custom-fn"}
+	if got := cfg.ResolveFunctionName("dev"); got != "custom-fn" {
+		t.Errorf("explicit: got %q, want custom-fn", got)
+	}
+	// {env} placeholder substitution
+	cfg.Lambda = &LambdaConfig{FunctionName: "smaug-{env}-fn"}
+	if got := cfg.ResolveFunctionName("prod"); got != "smaug-prod-fn" {
+		t.Errorf("placeholder: got %q, want smaug-prod-fn", got)
+	}
+}
+
+func TestValidateLambdaWithoutFunctionName(t *testing.T) {
+	cfg := &DeployConfig{
+		Name:    "smaug",
+		Region:  "us-east-1",
+		Runtime: RuntimeLambda,
+		Environments: map[string]EnvConfig{
+			"dev": {Account: "123456789012"},
+		},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("lambda without functionName should be valid (convention), got %v", err)
 	}
 }
 
