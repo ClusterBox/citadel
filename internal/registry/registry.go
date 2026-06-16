@@ -120,10 +120,15 @@ func resolveEntry(e Entry) (Service, error) {
 		RepoPath: e.Repo,
 	}
 	if rt == config.RuntimeLambda {
-		if cfg.Lambda == nil || cfg.Lambda.FunctionName == "" {
-			return Service{}, fmt.Errorf("%s: lambda.functionName required for runtime: lambda", cfgPath)
+		// Mirror config.ResolveFunctionName: an explicit functionName (with
+		// "{env}" substitution) wins, otherwise the "<name>-<env>" convention
+		// applies. Convention-based Lambda services (e.g. smaug, which sets no
+		// functionName) must not be dropped from the registry.
+		fnCfg := &config.DeployConfig{Name: cfg.Name}
+		if cfg.Lambda != nil {
+			fnCfg.Lambda = &config.LambdaConfig{FunctionName: cfg.Lambda.FunctionName}
 		}
-		svc.LambdaFunction = cfg.Lambda.FunctionName
+		svc.LambdaFunction = fnCfg.ResolveFunctionName(e.Env)
 	}
 	return svc, nil
 }
