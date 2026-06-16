@@ -107,7 +107,7 @@ Single source of truth: citadel.yml defines everything about your deployment.`,
 				return fmt.Errorf("failed to create AWS client: %w", err)
 			}
 
-			result, err := awsClient.SyncSecrets(ctx, cfg, envFile, dryRun)
+			result, err := awsClient.SyncSecrets(ctx, cfg, environment, envFile, dryRun)
 			if err != nil {
 				return fmt.Errorf("failed to sync secrets: %w", err)
 			}
@@ -185,13 +185,13 @@ Single source of truth: citadel.yml defines everything about your deployment.`,
 			// ECS service status
 			fmt.Printf("🚀 ECS Service:\n")
 			ecsClient := awsClient.NewECSClient()
-			if err := ecsClient.GetServiceStatus(ctx, cfg); err != nil {
+			if err := ecsClient.GetServiceStatus(ctx, cfg, environment); err != nil {
 				fmt.Printf("   Error: %v\n", err)
 			}
 
 			// Recent logs
 			fmt.Printf("\n📜 Recent Logs:\n")
-			logGroup, err := ecsClient.DiscoverLogGroup(ctx, cfg)
+			logGroup, err := ecsClient.DiscoverLogGroup(ctx, cfg, environment)
 			if err != nil {
 				fmt.Printf("   Error: %v\n", err)
 			} else {
@@ -230,7 +230,7 @@ Single source of truth: citadel.yml defines everything about your deployment.`,
 				return fmt.Errorf("failed to create AWS client: %w", err)
 			}
 
-			logGroup, err := awsClient.NewECSClient().DiscoverLogGroup(ctx, cfg)
+			logGroup, err := awsClient.NewECSClient().DiscoverLogGroup(ctx, cfg, environment)
 			if err != nil {
 				return fmt.Errorf("failed to resolve log group: %w", err)
 			}

@@ -174,10 +174,10 @@ func resolveLogGroup(ctx context.Context, svc registry.Service) (string, error) 
 	}
 	switch svc.Runtime {
 	case config.RuntimeECS:
-		// DiscoverLogGroup needs Name to derive cluster/service convention.
-		// Other fields are unused by that code path.
+		// DiscoverLogGroup derives the cluster/service from the env-namespaced
+		// "<name>-<env>" convention, so it needs Name + the registered Env.
 		cfg := &config.DeployConfig{Name: svc.Name, Region: svc.Region}
-		return awsClient.NewECSClient().DiscoverLogGroup(ctx, cfg)
+		return awsClient.NewECSClient().DiscoverLogGroup(ctx, cfg, svc.Env)
 	case config.RuntimeLambda:
 		return awsClient.NewLambdaClient().ResolveLogGroup(ctx, svc.LambdaFunction)
 	default:

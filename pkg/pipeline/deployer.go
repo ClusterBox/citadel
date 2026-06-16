@@ -18,12 +18,12 @@ type Deployer interface {
 // references the :latest image just pushed).
 type ecsDeployer struct{ c *aws.ECSClient }
 
-func (d ecsDeployer) Update(ctx context.Context, cfg *config.DeployConfig, _, _ string) error {
-	return d.c.UpdateService(ctx, cfg)
+func (d ecsDeployer) Update(ctx context.Context, cfg *config.DeployConfig, env, _ string) error {
+	return d.c.UpdateService(ctx, cfg, env)
 }
 
-func (d ecsDeployer) WaitStable(ctx context.Context, cfg *config.DeployConfig, _ string) error {
-	return d.c.WaitForStableService(ctx, cfg)
+func (d ecsDeployer) WaitStable(ctx context.Context, cfg *config.DeployConfig, env string) error {
+	return d.c.WaitForStableService(ctx, cfg, env)
 }
 
 // lambdaDeployer points the function at the freshly pushed image.
