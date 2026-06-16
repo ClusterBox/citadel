@@ -50,6 +50,7 @@ Single source of truth: citadel.yml defines everything about your deployment.`,
 			wait, _ := cmd.Flags().GetBool("wait")
 			streamLogs, _ := cmd.Flags().GetBool("stream-logs")
 			tailLines, _ := cmd.Flags().GetInt("tail")
+			message, _ := cmd.Flags().GetString("message")
 
 			opts := &pipeline.DeployOptions{
 				ConfigPath:  configPath,
@@ -61,6 +62,7 @@ Single source of truth: citadel.yml defines everything about your deployment.`,
 				Wait:        wait,
 				StreamLogs:  streamLogs,
 				TailLines:   tailLines,
+				Message:     message,
 			}
 
 			return pipeline.Deploy(ctx, opts)
@@ -73,6 +75,8 @@ Single source of truth: citadel.yml defines everything about your deployment.`,
 	deployCmd.Flags().Bool("wait", false, "Wait for deployment to stabilize")
 	deployCmd.Flags().Bool("stream-logs", false, "Stream CloudWatch logs after deployment")
 	deployCmd.Flags().Int("tail", 100, "Number of log lines to show initially")
+	deployCmd.Flags().StringP("message", "m", "", "Description of what this deploy does (required)")
+	_ = deployCmd.MarkFlagRequired("message")
 
 	// sync-secrets command
 	syncSecretsCmd := &cobra.Command{
