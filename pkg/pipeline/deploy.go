@@ -327,10 +327,14 @@ func deployRecorder(ctx context.Context, cfg *config.DeployConfig, opts *DeployO
 
 	return func(deployErr error) {
 		defer db.Close()
+		// Detach from ctx: on a failed/timed-out deploy the original context is
+		// often already cancelled, which would make the mark statements no-op
+		// and leave the row stuck at in_progress forever.
+		markCtx := context.WithoutCancel(ctx)
 		if deployErr != nil {
-			_ = db.MarkFailed(ctx, id, deployErr.Error())
+			_ = db.MarkFailed(markCtx, id, deployErr.Error())
 			return
 		}
-		_ = db.MarkSuccess(ctx, id)
+		_ = db.MarkSuccess(markCtx, id)
 	}
 }
