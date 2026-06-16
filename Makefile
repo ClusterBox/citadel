@@ -1,4 +1,10 @@
-.PHONY: build build-logs install install-logs test clean fmt vet docker-logs
+.PHONY: build build-logs install install-logs uninstall update test clean fmt vet docker-logs check dev
+
+# Resolve where `go install` places binaries (GOBIN, else GOPATH/bin)
+GOBIN := $(shell go env GOBIN)
+ifeq ($(GOBIN),)
+GOBIN := $(shell go env GOPATH)/bin
+endif
 
 # Build the binary
 build:
@@ -11,6 +17,8 @@ build-logs:
 # Install globally
 install:
 	go install ./cmd/citadel
+	@echo "Installed citadel to $(GOBIN)/citadel"
+	@case ":$$PATH:" in *":$(GOBIN):"*) ;; *) echo "⚠️  $(GOBIN) is not on your PATH";; esac
 
 # Install the logs daemon globally
 install-logs:
@@ -42,3 +50,14 @@ check: fmt vet test
 # Development build with race detector
 dev:
 	go build -race -o bin/citadel ./cmd/citadel
+
+# Remove the installed binary
+uninstall:
+	rm -f $(GOBIN)/citadel
+	@echo "Removed $(GOBIN)/citadel"
+
+# Pull latest and reinstall
+update:
+	git pull --ff-only
+	go install ./cmd/citadel
+	@echo "Updated citadel in $(GOBIN)"
