@@ -1,0 +1,33 @@
+{{define "deployments_page"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Citadel — Deployments</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/htmx.min.js"></script>
+</head>
+<body>
+  <h1>🏰 Deployments</h1>
+  <form hx-get="/deployments/rows" hx-target="#rows" hx-trigger="change, submit">
+    <input type="text" name="project" placeholder="project" value="{{.Project}}">
+    <input type="text" name="env" placeholder="env" value="{{.Env}}">
+    <button type="submit">Filter</button>
+  </form>
+  <table>
+    <thead>
+      <tr><th>When</th><th>Project</th><th>Env</th><th>Runtime</th><th>Target</th>
+          <th>SHA</th><th>Status</th><th>Message</th><th>By</th><th>Took</th></tr>
+    </thead>
+    <tbody id="rows" hx-get="/deployments/rows" hx-trigger="load, every 5s">
+      {{template "deployments_rows" .}}
+    </tbody>
+  </table>
+</body>
+</html>{{end}}
+
+{{define "deployments_rows"}}{{range .Rows}}<tr class="status-{{.Status}}">
+  <td>{{fmtTime .StartedAt}}</td><td>{{.Project}}</td><td>{{.Env}}</td>
+  <td>{{.Runtime}}</td><td>{{.Target}}</td><td>{{.GitSHA}}</td>
+  <td>{{.Status}}</td><td>{{.Message}}</td><td>{{.DeployedBy}}</td>
+  <td>{{.Took}}</td>
+</tr>{{else}}<tr><td colspan="10">No deployments recorded yet.</td></tr>{{end}}{{end}}
