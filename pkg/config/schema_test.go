@@ -63,7 +63,7 @@ func TestValidate_MalformedConsumeArnFails(t *testing.T) {
 	}
 }
 
-func TestValidate_LambdaRuntimeRequiresFunctionName(t *testing.T) {
+func TestValidate_LambdaRuntimeRequiresEnvironments(t *testing.T) {
 	// functionName is now optional for lambda (convention-based); missing
 	// environments should still be caught.
 	cfg := &DeployConfig{

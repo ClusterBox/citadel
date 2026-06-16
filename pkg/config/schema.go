@@ -51,7 +51,7 @@ func (c *DeployConfig) ResolvedRuntime() Runtime {
 // ResolveFunctionName returns the Lambda function name for env. When
 // lambda.functionName is set it is used verbatim with "{env}" substituted;
 // otherwise the "<name>-<env>" convention is used (e.g. smaug-dev), mirroring
-// the ECS "<name>-cluster"/"<name>-service" conventions.
+// the ECS "<name>-cluster"/"<name>-service" conventions. env must be non-empty.
 func (c *DeployConfig) ResolveFunctionName(env string) string {
 	if c.Lambda != nil && c.Lambda.FunctionName != "" {
 		return strings.ReplaceAll(c.Lambda.FunctionName, "{env}", env)
