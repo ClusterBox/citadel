@@ -41,10 +41,11 @@ func (s *DeployServer) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /static/", http.FileServer(http.FS(staticFS())))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/deployments", http.StatusFound)
+		http.Redirect(w, r, "/deployments", http.StatusSeeOther)
 	})
 	mux.HandleFunc("GET /deployments", s.handlePage)
 	mux.HandleFunc("GET /deployments/rows", s.handleRows)
@@ -84,6 +85,7 @@ func (s *DeployServer) handlePage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.templates.ExecuteTemplate(w, "deployments_page", v); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
@@ -95,6 +97,7 @@ func (s *DeployServer) handleRows(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.templates.ExecuteTemplate(w, "deployments_rows", v); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}

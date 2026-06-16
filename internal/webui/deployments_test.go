@@ -49,3 +49,28 @@ func TestDeployServerRendersRows(t *testing.T) {
 		t.Errorf("expected status class in page")
 	}
 }
+
+func TestDeployServerRowsFragment(t *testing.T) {
+	srv, err := NewDeployServer(seededDeployDB(t))
+	if err != nil {
+		t.Fatalf("NewDeployServer: %v", err)
+	}
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/deployments/rows")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	body := string(raw)
+	// The fragment is rows only: it contains the seeded deploy but not the
+	// surrounding page shell.
+	if !strings.Contains(body, "smaug") {
+		t.Errorf("expected seeded deploy in fragment, got:\n%s", body)
+	}
+	if strings.Contains(body, "<html") {
+		t.Errorf("fragment should not include the page shell, got:\n%s", body)
+	}
+}
