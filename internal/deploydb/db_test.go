@@ -56,7 +56,10 @@ func TestInsertAndMarkSuccess(t *testing.T) {
 func TestMarkFailed(t *testing.T) {
 	db := mustOpen(t)
 	ctx := context.Background()
-	id, _ := db.Insert(ctx, sample())
+	id, err := db.Insert(ctx, sample())
+	if err != nil {
+		t.Fatalf("insert: %v", err)
+	}
 	if err := db.MarkFailed(ctx, id, "boom"); err != nil {
 		t.Fatalf("mark failed: %v", err)
 	}
@@ -73,8 +76,12 @@ func TestListFilters(t *testing.T) {
 	b := sample()
 	b.Project = "legolas"
 	b.Env = "prod"
-	db.Insert(ctx, a)
-	db.Insert(ctx, b)
+	if _, err := db.Insert(ctx, a); err != nil {
+		t.Fatalf("insert a: %v", err)
+	}
+	if _, err := db.Insert(ctx, b); err != nil {
+		t.Fatalf("insert b: %v", err)
+	}
 
 	rows, _ := db.List(ctx, Filter{Project: "legolas", Limit: 10})
 	if len(rows) != 1 || rows[0].Project != "legolas" {
