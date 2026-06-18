@@ -149,6 +149,42 @@ func TestBuildDashboardSingleEnvOneColumn(t *testing.T) {
 	}
 }
 
+func TestDashboardRendersColumnPerEnv(t *testing.T) {
+	srv, db := newTestServer(t)
+	ctx := context.Background()
+	_ = db.UpsertService(ctx, logsdb.Service{ID: "smaug-prod", Name: "smaug", Env: "prod", Region: "r", Runtime: "lambda", LogGroup: "lg", RepoPath: "/r"})
+	_ = db.UpsertService(ctx, logsdb.Service{ID: "smaug-dev", Name: "smaug", Env: "dev", Region: "r", Runtime: "lambda", LogGroup: "lg", RepoPath: "/r"})
+
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/logs?app=smaug")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	s := string(body)
+
+	// one live SSE tail per env, each keyed by its own service ID
+	if !strings.Contains(s, "/logs/stream?service=smaug-dev") {
+		t.Fatalf("missing dev stream wiring: %s", s)
+	}
+	if !strings.Contains(s, "/logs/stream?service=smaug-prod") {
+		t.Fatalf("missing prod stream wiring: %s", s)
+	}
+	// one errors fragment per env
+	if !strings.Contains(s, "/logs/errors?service=smaug-dev") ||
+		!strings.Contains(s, "/logs/errors?service=smaug-prod") {
+		t.Fatalf("missing per-env errors wiring: %s", s)
+	}
+	// per-column toggle IDs must be unique (suffixed with service id)
+	if !strings.Contains(s, "errors-view-smaug-dev") ||
+		!strings.Contains(s, "errors-view-smaug-prod") {
+		t.Fatalf("toggle element IDs not made unique per column: %s", s)
+	}
+}
+
 func TestRailGroupsAppsByName(t *testing.T) {
 	srv, db := newTestServer(t)
 	ctx := context.Background()
