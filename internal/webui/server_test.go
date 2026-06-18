@@ -148,3 +148,31 @@ func TestBuildDashboardSingleEnvOneColumn(t *testing.T) {
 		t.Fatalf("unexpected app rail entry: %#v", view.Apps)
 	}
 }
+
+func TestRailGroupsAppsByName(t *testing.T) {
+	srv, db := newTestServer(t)
+	ctx := context.Background()
+	_ = db.UpsertService(ctx, logsdb.Service{ID: "smaug-prod", Name: "smaug", Env: "prod", Region: "r", Runtime: "lambda", LogGroup: "lg", RepoPath: "/r"})
+	_ = db.UpsertService(ctx, logsdb.Service{ID: "smaug-dev", Name: "smaug", Env: "dev", Region: "r", Runtime: "lambda", LogGroup: "lg", RepoPath: "/r"})
+
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/logs/services?app=smaug")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	s := string(body)
+	// one app link, not one per env
+	if strings.Count(s, "/logs?app=smaug") != 1 {
+		t.Fatalf("expected exactly one app link, body: %s", s)
+	}
+	if strings.Contains(s, "?service=") {
+		t.Fatalf("rail should not link by service id, body: %s", s)
+	}
+	if !strings.Contains(s, "dev · prod") {
+		t.Fatalf("expected env indicator 'dev · prod', body: %s", s)
+	}
+}
