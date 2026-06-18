@@ -125,3 +125,26 @@ table.errors td { padding: 8px; vertical-align: top; border-bottom: 1px solid va
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+.env-split { display: flex; gap: 24px; align-items: flex-start; }
+.env-split .env-col { flex: 1 1 0; min-width: 0; }
+/* single column spans full width naturally (flex:1 with one child) */
+
+.env-col-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.env-col-env {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+.env-col-runtime { font-size: 11px; color: var(--muted); }
+
+@media (max-width: 900px) {
+  .env-split.split { flex-direction: column; }
+}

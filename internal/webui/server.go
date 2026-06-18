@@ -14,7 +14,9 @@ import (
 	"html/template"
 	"io/fs"
 	"net/http"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ClusterBox/citadel/internal/ingest"
@@ -100,8 +102,15 @@ func staticFS() fs.FS {
 }
 
 type dashboardView struct {
-	Services []serviceView
-	Selected string
+	Apps     []appView     // left-rail entries, one per app Name
+	Columns  []serviceView // content columns, one per env of the selected app
+	Selected string        // selected app Name
+}
+
+type appView struct {
+	Name       string
+	Envs       string // "·"-joined alphabetical env list, e.g. "dev · prod"
+	ErrorCount int    // summed across the app's services
 }
 
 type serviceView struct {
@@ -114,7 +123,7 @@ type serviceView struct {
 
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	view, err := s.buildDashboard(ctx, r.URL.Query().Get("service"))
+	view, err := s.buildDashboard(ctx, r.URL.Query().Get("app"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -125,7 +134,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) buildDashboard(ctx context.Context, selected string) (dashboardView, error) {
+func (s *Server) buildDashboard(ctx context.Context, app string) (dashboardView, error) {
 	services, err := s.db.ListServices(ctx)
 	if err != nil {
 		return dashboardView{}, err
@@ -135,22 +144,61 @@ func (s *Server) buildDashboard(ctx context.Context, selected string) (dashboard
 	if err != nil {
 		return dashboardView{}, err
 	}
-	view := dashboardView{Selected: selected}
+
+	// Group services by Name, preserving the ListServices order (ID-sorted).
+	type group struct {
+		name     string
+		services []logsdb.Service
+	}
+	var groups []*group
+	byName := map[string]*group{}
 	for _, svc := range services {
-		view.Services = append(view.Services, serviceView{
-			ID: svc.ID, Name: svc.Name, Env: svc.Env, Runtime: svc.Runtime,
-			ErrorCount: counts[svc.ID],
+		g, ok := byName[svc.Name]
+		if !ok {
+			g = &group{name: svc.Name}
+			byName[svc.Name] = g
+			groups = append(groups, g)
+		}
+		g.services = append(g.services, svc)
+	}
+
+	view := dashboardView{Selected: app}
+	for _, g := range groups {
+		envs := make([]string, 0, len(g.services))
+		total := 0
+		for _, svc := range g.services {
+			envs = append(envs, svc.Env)
+			total += counts[svc.ID]
+		}
+		sort.Strings(envs)
+		view.Apps = append(view.Apps, appView{
+			Name:       g.name,
+			Envs:       strings.Join(envs, " · "),
+			ErrorCount: total,
 		})
 	}
-	if view.Selected == "" && len(view.Services) > 0 {
-		view.Selected = view.Services[0].ID
+
+	if view.Selected == "" && len(view.Apps) > 0 {
+		view.Selected = view.Apps[0].Name
+	}
+
+	if g, ok := byName[view.Selected]; ok {
+		cols := make([]logsdb.Service, len(g.services))
+		copy(cols, g.services)
+		sort.Slice(cols, func(i, j int) bool { return cols[i].Env < cols[j].Env })
+		for _, svc := range cols {
+			view.Columns = append(view.Columns, serviceView{
+				ID: svc.ID, Name: svc.Name, Env: svc.Env, Runtime: svc.Runtime,
+				ErrorCount: counts[svc.ID],
+			})
+		}
 	}
 	return view, nil
 }
 
 func (s *Server) handleServicesFragment(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	view, err := s.buildDashboard(ctx, r.URL.Query().Get("service"))
+	view, err := s.buildDashboard(ctx, r.URL.Query().Get("app"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

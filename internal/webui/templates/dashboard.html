@@ -17,35 +17,46 @@
     {{template "services_fragment.html" .}}
 
     <section class="content">
-      {{if .Selected}}
+      {{if .Columns}}
         <h1>{{.Selected}}</h1>
-        <div style="margin-bottom: 16px; border-bottom: 1px solid var(--border); padding-bottom: 8px;">
-          <button onclick="document.getElementById('errors-view').style.display='block'; document.getElementById('live-view').style.display='none';" style="background:var(--panel); color:var(--text); border:1px solid var(--border); padding:6px 12px; border-radius:4px; cursor:pointer; margin-right:8px;">Errors</button>
-          <button onclick="document.getElementById('errors-view').style.display='none'; document.getElementById('live-view').style.display='block';" style="background:var(--panel); color:var(--text); border:1px solid var(--border); padding:6px 12px; border-radius:4px; cursor:pointer;">Live Logs</button>
-        </div>
+        <div class="env-split{{if gt (len .Columns) 1}} split{{end}}">
+          {{range .Columns}}
+          <div class="env-col">
+            <div class="env-col-head">
+              <span class="env-col-env">{{.Env}}</span>
+              <span class="env-col-runtime">{{.Runtime}}</span>
+              {{if .ErrorCount}}<span class="badge">{{.ErrorCount}}</span>{{end}}
+            </div>
 
-        <div id="errors-view" style="display:block;">
-          <p class="muted">errors in the last 7 days · refreshes every 5s</p>
-          <div id="errors"
-               hx-get="/logs/errors?service={{.Selected}}"
-               hx-trigger="load, every 5s"
-               hx-swap="innerHTML">
-            <p class="muted">loading…</p>
+            <div style="margin-bottom: 16px; border-bottom: 1px solid var(--border); padding-bottom: 8px;">
+              <button onclick="document.getElementById('errors-view-{{.ID}}').style.display='block'; document.getElementById('live-view-{{.ID}}').style.display='none';" style="background:var(--panel); color:var(--text); border:1px solid var(--border); padding:6px 12px; border-radius:4px; cursor:pointer; margin-right:8px;">Errors</button>
+              <button onclick="document.getElementById('errors-view-{{.ID}}').style.display='none'; document.getElementById('live-view-{{.ID}}').style.display='block';" style="background:var(--panel); color:var(--text); border:1px solid var(--border); padding:6px 12px; border-radius:4px; cursor:pointer;">Live Logs</button>
+            </div>
+
+            <div id="errors-view-{{.ID}}" style="display:block;">
+              <p class="muted">errors in the last 7 days · refreshes every 5s</p>
+              <div hx-get="/logs/errors?service={{.ID}}"
+                   hx-trigger="load, every 5s"
+                   hx-swap="innerHTML">
+                <p class="muted">loading…</p>
+              </div>
+            </div>
+
+            <div id="live-view-{{.ID}}" style="display:none;">
+              <p class="muted">live tailing from cloudwatch...</p>
+              <table class="errors">
+                <thead>
+                  <tr>
+                    <th>when</th>
+                    <th>message</th>
+                  </tr>
+                </thead>
+                <tbody hx-ext="sse" sse-connect="/logs/stream?service={{.ID}}" sse-swap="message" hx-swap="beforeend">
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
-
-        <div id="live-view" style="display:none;">
-          <p class="muted">live tailing from cloudwatch...</p>
-          <table class="errors">
-            <thead>
-              <tr>
-                <th>when</th>
-                <th>message</th>
-              </tr>
-            </thead>
-            <tbody hx-ext="sse" sse-connect="/logs/stream?service={{.Selected}}" sse-swap="message" hx-swap="beforeend">
-            </tbody>
-          </table>
+          {{end}}
         </div>
       {{else}}
         <h1>no service selected</h1>
