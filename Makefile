@@ -15,7 +15,7 @@ build-logs:
 	go build -o bin/citadel-logs ./cmd/citadel-logs
 
 # Install globally
-install:
+install: install-logs
 	go install ./cmd/citadel
 	@echo "Installed citadel to $(GOBIN)/citadel"
 	@case ":$$PATH:" in *":$(GOBIN):"*) ;; *) echo "⚠️  $(GOBIN) is not on your PATH";; esac
@@ -59,5 +59,5 @@ uninstall:
 # Pull latest and reinstall
 update:
 	git pull --ff-only
-	go install ./cmd/citadel
+	go install ./cmd/citadel ./cmd/citadel-logs
 	@echo "Updated citadel in $(GOBIN)"
