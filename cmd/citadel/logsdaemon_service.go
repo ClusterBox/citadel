@@ -71,3 +71,51 @@ func resolveLogsBinary() (string, error) {
 	}
 	return resolveLogsBinaryIn(exeDir, exec.LookPath)
 }
+
+func dataDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".local", "share", "citadel"), nil
+}
+
+func unitFilePath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".config", "systemd", "user", serviceName), nil
+}
+
+// installUnit resolves the daemon binary, ensures the data and unit
+// directories exist, and writes the rendered unit file.
+func installUnit(addr, profile, region string) error {
+	bin, err := resolveLogsBinary()
+	if err != nil {
+		return err
+	}
+	dd, err := dataDir()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dd, 0o755); err != nil {
+		return err
+	}
+	unitPath, err := unitFilePath()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(unitPath), 0o755); err != nil {
+		return err
+	}
+	unit := renderUnit(unitOptions{
+		BinaryPath:   bin,
+		RegistryPath: unitRegistryPath,
+		DBPath:       unitDBPath,
+		Addr:         addr,
+		Profile:      profile,
+		Region:       region,
+	})
+	return os.WriteFile(unitPath, []byte(unit), 0o644)
+}

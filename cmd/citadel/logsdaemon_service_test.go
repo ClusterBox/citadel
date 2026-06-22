@@ -98,3 +98,38 @@ func TestResolveLogsBinaryIn_NotFound(t *testing.T) {
 		t.Fatal("expected error when binary missing")
 	}
 }
+
+func TestInstallUnit_WritesFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// Put a fake citadel-logs on PATH so resolveLogsBinary succeeds.
+	binDir := t.TempDir()
+	fakeBin := filepath.Join(binDir, "citadel-logs")
+	if err := os.WriteFile(fakeBin, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir)
+
+	if err := installUnit(defaultDaemonAddr, "clusterbox", "us-east-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	unitPath := filepath.Join(home, ".config", "systemd", "user", serviceName)
+	data, err := os.ReadFile(unitPath)
+	if err != nil {
+		t.Fatalf("unit file not written: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "ExecStart="+fakeBin+" --registry") {
+		t.Fatalf("ExecStart does not reference resolved binary:\n%s", content)
+	}
+	if !strings.Contains(content, "Environment=AWS_PROFILE=clusterbox") {
+		t.Fatalf("missing profile env:\n%s", content)
+	}
+
+	// Data directory must have been created.
+	if fi, err := os.Stat(filepath.Join(home, ".local", "share", "citadel")); err != nil || !fi.IsDir() {
+		t.Fatalf("data dir not created: %v", err)
+	}
+}
