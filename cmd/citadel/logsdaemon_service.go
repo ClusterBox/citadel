@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"strings"
 )
@@ -118,4 +119,62 @@ func installUnit(addr, profile, region string) error {
 		Region:       region,
 	})
 	return os.WriteFile(unitPath, []byte(unit), 0o644)
+}
+
+type execRunner interface {
+	Run(name string, args ...string) error
+	Output(name string, args ...string) (string, error)
+}
+
+type osRunner struct{}
+
+func (osRunner) Run(name string, args ...string) error {
+	c := exec.Command(name, args...)
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
+	c.Stdin = os.Stdin
+	return c.Run()
+}
+
+func (osRunner) Output(name string, args ...string) (string, error) {
+	out, err := exec.Command(name, args...).Output()
+	return string(out), err
+}
+
+func enableLinger(r execRunner) error {
+	u, err := user.Current()
+	if err != nil {
+		return err
+	}
+	return r.Run("loginctl", "enable-linger", u.Username)
+}
+
+func startService(r execRunner) error {
+	if err := r.Run("systemctl", "--user", "daemon-reload"); err != nil {
+		return err
+	}
+	if err := r.Run("systemctl", "--user", "enable", "--now", serviceName); err != nil {
+		return err
+	}
+	if err := enableLinger(r); err != nil {
+		fmt.Fprintf(os.Stderr, "⚠️  could not enable linger (service won't start until login): %v\n", err)
+	}
+	return nil
+}
+
+func stopService(r execRunner, disable bool) error {
+	if err := r.Run("systemctl", "--user", "stop", serviceName); err != nil {
+		return err
+	}
+	if disable {
+		return r.Run("systemctl", "--user", "disable", serviceName)
+	}
+	return nil
+}
+
+func restartService(r execRunner) error {
+	if err := r.Run("systemctl", "--user", "daemon-reload"); err != nil {
+		return err
+	}
+	return r.Run("systemctl", "--user", "restart", serviceName)
 }

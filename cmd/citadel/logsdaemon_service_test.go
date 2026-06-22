@@ -133,3 +133,103 @@ func TestInstallUnit_WritesFile(t *testing.T) {
 		t.Fatalf("data dir not created: %v", err)
 	}
 }
+
+type fakeRunner struct {
+	calls   []string
+	runErr  error
+	outputs map[string]string
+}
+
+func key(name string, args ...string) string {
+	return strings.Join(append([]string{name}, args...), " ")
+}
+
+func (f *fakeRunner) Run(name string, args ...string) error {
+	f.calls = append(f.calls, key(name, args...))
+	return f.runErr
+}
+
+func (f *fakeRunner) Output(name string, args ...string) (string, error) {
+	k := key(name, args...)
+	f.calls = append(f.calls, k)
+	return f.outputs[k], nil
+}
+
+func TestStartService_CommandSequence(t *testing.T) {
+	r := &fakeRunner{}
+	if err := startService(r); err != nil {
+		t.Fatal(err)
+	}
+	// First two calls are deterministic; linger uses the current username.
+	if len(r.calls) < 3 {
+		t.Fatalf("expected at least 3 calls, got %v", r.calls)
+	}
+	if r.calls[0] != "systemctl --user daemon-reload" {
+		t.Fatalf("call[0] = %q", r.calls[0])
+	}
+	if r.calls[1] != "systemctl --user enable --now citadel-logs.service" {
+		t.Fatalf("call[1] = %q", r.calls[1])
+	}
+	if !strings.HasPrefix(r.calls[2], "loginctl enable-linger ") {
+		t.Fatalf("call[2] = %q", r.calls[2])
+	}
+}
+
+func TestStartService_LingerFailureIsNonFatal(t *testing.T) {
+	// loginctl enable-linger can be denied; that must not fail start.
+	if err := startService(&lingerFailRunner{}); err != nil {
+		t.Fatalf("linger failure should not be fatal, got %v", err)
+	}
+}
+
+// lingerFailRunner succeeds for systemctl but fails loginctl.
+type lingerFailRunner struct{ calls []string }
+
+func (f *lingerFailRunner) Run(name string, args ...string) error {
+	f.calls = append(f.calls, key(name, args...))
+	if name == "loginctl" {
+		return errors.New("enable-linger denied")
+	}
+	return nil
+}
+func (f *lingerFailRunner) Output(name string, args ...string) (string, error) {
+	return "", nil
+}
+
+func TestStopService_WithDisable(t *testing.T) {
+	r := &fakeRunner{}
+	if err := stopService(r, true); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"systemctl --user stop citadel-logs.service",
+		"systemctl --user disable citadel-logs.service",
+	}
+	if strings.Join(r.calls, "|") != strings.Join(want, "|") {
+		t.Fatalf("calls = %v", r.calls)
+	}
+}
+
+func TestStopService_WithoutDisable(t *testing.T) {
+	r := &fakeRunner{}
+	if err := stopService(r, false); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.calls) != 1 || r.calls[0] != "systemctl --user stop citadel-logs.service" {
+		t.Fatalf("calls = %v", r.calls)
+	}
+}
+
+func TestRestartService_CommandSequence(t *testing.T) {
+	r := &fakeRunner{}
+	if err := restartService(r); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"systemctl --user daemon-reload",
+		"systemctl --user restart citadel-logs.service",
+	}
+	if strings.Join(r.calls, "|") != strings.Join(want, "|") {
+		t.Fatalf("calls = %v", r.calls)
+	}
+}
