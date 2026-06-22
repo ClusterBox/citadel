@@ -233,3 +233,40 @@ func TestRestartService_CommandSequence(t *testing.T) {
 		t.Fatalf("calls = %v", r.calls)
 	}
 }
+
+func TestLogsArgs(t *testing.T) {
+	cases := []struct {
+		lines  int
+		follow bool
+		want   string
+	}{
+		{0, false, "--user -u citadel-logs.service"},
+		{50, false, "--user -u citadel-logs.service -n 50"},
+		{0, true, "--user -u citadel-logs.service -f"},
+		{20, true, "--user -u citadel-logs.service -n 20 -f"},
+	}
+	for _, c := range cases {
+		got := strings.Join(logsArgs(c.lines, c.follow), " ")
+		if got != c.want {
+			t.Fatalf("logsArgs(%d,%v) = %q, want %q", c.lines, c.follow, got, c.want)
+		}
+	}
+}
+
+func TestFormatStatus(t *testing.T) {
+	got := formatStatus("active", "/home/me/.citadel/registry.yml", 3)
+	if !strings.Contains(got, "active") {
+		t.Fatalf("missing state:\n%s", got)
+	}
+	if !strings.Contains(got, "http://localhost:5500/logs") {
+		t.Fatalf("missing dashboard URL:\n%s", got)
+	}
+	if !strings.Contains(got, "3 service") {
+		t.Fatalf("missing service count:\n%s", got)
+	}
+
+	unknown := formatStatus("", "/x/registry.yml", 0)
+	if !strings.Contains(unknown, "unknown") {
+		t.Fatalf("empty state should render unknown:\n%s", unknown)
+	}
+}

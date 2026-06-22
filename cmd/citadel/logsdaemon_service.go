@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -177,4 +178,23 @@ func restartService(r execRunner) error {
 		return err
 	}
 	return r.Run("systemctl", "--user", "restart", serviceName)
+}
+
+func logsArgs(lines int, follow bool) []string {
+	args := []string{"--user", "-u", serviceName}
+	if lines > 0 {
+		args = append(args, "-n", strconv.Itoa(lines))
+	}
+	if follow {
+		args = append(args, "-f")
+	}
+	return args
+}
+
+func formatStatus(state, registryPath string, count int) string {
+	if strings.TrimSpace(state) == "" {
+		state = "unknown"
+	}
+	return fmt.Sprintf("citadel-logs: %s\ndashboard:    http://localhost:5500/logs\nregistered:   %d service(s) in %s\n",
+		state, count, registryPath)
 }
