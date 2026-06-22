@@ -6,8 +6,11 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
+
+	"github.com/spf13/cobra"
 )
 
 const (
@@ -197,4 +200,133 @@ func formatStatus(state, registryPath string, count int) string {
 	}
 	return fmt.Sprintf("citadel-logs: %s\ndashboard:    http://localhost:5500/logs\nregistered:   %d service(s) in %s\n",
 		state, count, registryPath)
+}
+
+func ensureLinux() error {
+	if runtime.GOOS != "linux" {
+		return fmt.Errorf("the systemd service is Linux-only; on this platform run: docker compose -f docker-compose.logs.yml up -d")
+	}
+	return nil
+}
+
+// resolveAWSEnv applies flag overrides, falling back to the current shell's
+// AWS_PROFILE / AWS_REGION.
+func resolveAWSEnv(profileFlag, regionFlag string) (profile, region string) {
+	profile = profileFlag
+	if profile == "" {
+		profile = os.Getenv("AWS_PROFILE")
+	}
+	region = regionFlag
+	if region == "" {
+		region = os.Getenv("AWS_REGION")
+	}
+	return profile, region
+}
+
+func newLogsDaemonStartCmd() *cobra.Command {
+	var profile, region, addr string
+	cmd := &cobra.Command{
+		Use:   "start",
+		Short: "Install and start the citadel-logs systemd service",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := ensureLinux(); err != nil {
+				return err
+			}
+			p, rg := resolveAWSEnv(profile, region)
+			if err := installUnit(addr, p, rg); err != nil {
+				return err
+			}
+			if err := startService(osRunner{}); err != nil {
+				return err
+			}
+			fmt.Printf("✅ citadel-logs started — http://localhost:5500/logs\n")
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&profile, "profile", "", "AWS profile (defaults to $AWS_PROFILE)")
+	cmd.Flags().StringVar(&region, "region", "", "AWS region (defaults to $AWS_REGION)")
+	cmd.Flags().StringVar(&addr, "addr", defaultDaemonAddr, "HTTP listen address")
+	return cmd
+}
+
+func newLogsDaemonStopCmd() *cobra.Command {
+	var disable bool
+	cmd := &cobra.Command{
+		Use:   "stop",
+		Short: "Stop the citadel-logs service",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := ensureLinux(); err != nil {
+				return err
+			}
+			if err := stopService(osRunner{}, disable); err != nil {
+				return err
+			}
+			fmt.Printf("✅ citadel-logs stopped\n")
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&disable, "disable", false, "Also disable autostart on boot")
+	return cmd
+}
+
+func newLogsDaemonRestartCmd() *cobra.Command {
+	var profile, region, addr string
+	cmd := &cobra.Command{
+		Use:   "restart",
+		Short: "Re-install the unit and restart the service",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := ensureLinux(); err != nil {
+				return err
+			}
+			p, rg := resolveAWSEnv(profile, region)
+			if err := installUnit(addr, p, rg); err != nil {
+				return err
+			}
+			if err := restartService(osRunner{}); err != nil {
+				return err
+			}
+			fmt.Printf("✅ citadel-logs restarted — http://localhost:5500/logs\n")
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&profile, "profile", "", "AWS profile (defaults to $AWS_PROFILE)")
+	cmd.Flags().StringVar(&region, "region", "", "AWS region (defaults to $AWS_REGION)")
+	cmd.Flags().StringVar(&addr, "addr", defaultDaemonAddr, "HTTP listen address")
+	return cmd
+}
+
+func newLogsDaemonStatusCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "status",
+		Short: "Show whether the citadel-logs service is running",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := ensureLinux(); err != nil {
+				return err
+			}
+			// is-active exits non-zero when inactive; the stdout text is what we want.
+			out, _ := osRunner{}.Output("systemctl", "--user", "is-active", serviceName)
+			regPath := defaultRegistryPath()
+			f, _ := loadOrEmpty(regPath)
+			fmt.Print(formatStatus(out, regPath, len(f.Services)))
+			return nil
+		},
+	}
+}
+
+func newLogsDaemonLogsCmd() *cobra.Command {
+	var lines int
+	var noFollow bool
+	cmd := &cobra.Command{
+		Use:   "logs",
+		Short: "Tail the citadel-logs service journal",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := ensureLinux(); err != nil {
+				return err
+			}
+			return osRunner{}.Run("journalctl", logsArgs(lines, !noFollow)...)
+		},
+	}
+	cmd.Flags().IntVarP(&lines, "lines", "n", 0, "Number of past lines to show")
+	cmd.Flags().BoolVar(&noFollow, "no-follow", false, "Print and exit instead of following")
+	return cmd
 }
