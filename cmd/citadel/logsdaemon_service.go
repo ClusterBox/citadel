@@ -96,6 +96,11 @@ func unitFilePath() (string, error) {
 // installUnit resolves the daemon binary, ensures the data and unit
 // directories exist, and writes the rendered unit file.
 func installUnit(addr, profile, region string) error {
+	for _, v := range []string{addr, profile, region} {
+		if strings.ContainsAny(v, "\n\r") {
+			return fmt.Errorf("invalid value %q: addr/profile/region must not contain newlines", v)
+		}
+	}
 	bin, err := resolveLogsBinary()
 	if err != nil {
 		return err
@@ -239,7 +244,7 @@ func newLogsDaemonStartCmd() *cobra.Command {
 			if err := startService(osRunner{}); err != nil {
 				return err
 			}
-			fmt.Printf("✅ citadel-logs started — http://localhost:5500/logs\n")
+			fmt.Println("✅ citadel-logs started — http://localhost:5500/logs")
 			return nil
 		},
 	}
@@ -261,7 +266,7 @@ func newLogsDaemonStopCmd() *cobra.Command {
 			if err := stopService(osRunner{}, disable); err != nil {
 				return err
 			}
-			fmt.Printf("✅ citadel-logs stopped\n")
+			fmt.Println("✅ citadel-logs stopped")
 			return nil
 		},
 	}
@@ -285,7 +290,7 @@ func newLogsDaemonRestartCmd() *cobra.Command {
 			if err := restartService(osRunner{}); err != nil {
 				return err
 			}
-			fmt.Printf("✅ citadel-logs restarted — http://localhost:5500/logs\n")
+			fmt.Println("✅ citadel-logs restarted — http://localhost:5500/logs")
 			return nil
 		},
 	}
@@ -306,7 +311,10 @@ func newLogsDaemonStatusCmd() *cobra.Command {
 			// is-active exits non-zero when inactive; the stdout text is what we want.
 			out, _ := osRunner{}.Output("systemctl", "--user", "is-active", serviceName)
 			regPath := defaultRegistryPath()
-			f, _ := loadOrEmpty(regPath)
+			f, err := loadOrEmpty(regPath)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "⚠️  could not read registry %s: %v\n", regPath, err)
+			}
 			fmt.Print(formatStatus(out, regPath, len(f.Services)))
 			return nil
 		},

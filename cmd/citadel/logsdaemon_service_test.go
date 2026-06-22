@@ -269,4 +269,44 @@ func TestFormatStatus(t *testing.T) {
 	if !strings.Contains(unknown, "unknown") {
 		t.Fatalf("empty state should render unknown:\n%s", unknown)
 	}
+
+	wsOnly := formatStatus("   ", "/x/registry.yml", 0)
+	if !strings.Contains(wsOnly, "unknown") {
+		t.Fatalf("whitespace-only state should render unknown:\n%s", wsOnly)
+	}
+}
+
+func TestResolveAWSEnv_FlagOverridesEnv(t *testing.T) {
+	t.Setenv("AWS_PROFILE", "envprofile")
+	t.Setenv("AWS_REGION", "us-west-2")
+
+	// Flags win when set.
+	p, r := resolveAWSEnv("flagprofile", "eu-west-1")
+	if p != "flagprofile" || r != "eu-west-1" {
+		t.Fatalf("flags should win: got (%q,%q)", p, r)
+	}
+
+	// Empty flags fall back to env.
+	p, r = resolveAWSEnv("", "")
+	if p != "envprofile" || r != "us-west-2" {
+		t.Fatalf("should fall back to env: got (%q,%q)", p, r)
+	}
+}
+
+func TestInstallUnit_RejectsNewlineInjection(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	binDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(binDir, "citadel-logs"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir)
+
+	err := installUnit(defaultDaemonAddr, "evil\nExecStartPre=/bin/rm -rf x", "us-east-1")
+	if err == nil {
+		t.Fatal("expected installUnit to reject a profile containing a newline")
+	}
+	if _, statErr := os.Stat(filepath.Join(home, ".config", "systemd", "user", serviceName)); statErr == nil {
+		t.Fatal("unit file must not be written when validation fails")
+	}
 }

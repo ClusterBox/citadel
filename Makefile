@@ -53,8 +53,8 @@ dev:
 
 # Remove the installed binary
 uninstall:
-	rm -f $(GOBIN)/citadel
-	@echo "Removed $(GOBIN)/citadel"
+	rm -f $(GOBIN)/citadel $(GOBIN)/citadel-logs
+	@echo "Removed $(GOBIN)/citadel and $(GOBIN)/citadel-logs"
 
 # Pull latest and reinstall
 update:
