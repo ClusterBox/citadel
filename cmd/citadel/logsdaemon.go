@@ -33,6 +33,11 @@ change). This subcommand group is a thin convenience over editing that file.`,
 	cmd.AddCommand(newLogsDaemonRegisterCmd())
 	cmd.AddCommand(newLogsDaemonListCmd())
 	cmd.AddCommand(newLogsDaemonUnregisterCmd())
+	cmd.AddCommand(newLogsDaemonStartCmd())
+	cmd.AddCommand(newLogsDaemonStopCmd())
+	cmd.AddCommand(newLogsDaemonRestartCmd())
+	cmd.AddCommand(newLogsDaemonStatusCmd())
+	cmd.AddCommand(newLogsDaemonLogsCmd())
 	return cmd
 }
 

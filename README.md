@@ -56,26 +56,42 @@ It works across runtimes:
 - `runtime: lambda` — clusterbox Go Lambdas like smaug. Requires a
   `lambda: { functionName: ... }` block.
 
-### Run it
+### Run it as a service (Linux)
 
 ```bash
-# 1. Build the Docker image
-make docker-logs
+# 1. Install both binaries (citadel + citadel-logs)
+make install
 
 # 2. Register a repo
 cd ~/Documents/github/my-backend
 citadel logs-daemon register --env dev
 
-# 3. Start the daemon
-docker compose -f docker-compose.logs.yml up -d
+# 3. Start the daemon as a systemd user service
+citadel logs-daemon start
 
 # 4. Open the dashboard
 open http://localhost:5500/logs
 ```
 
-The daemon polls each service's CloudWatch log group every 10s, persists
-500-class events to SQLite (`/data/citadel-logs.db`), retains them for 7 days,
-and hot-reloads the registry on change.
+`citadel logs-daemon start` installs a systemd `--user` unit
+(`~/.config/systemd/user/citadel-logs.service`), enables it, and turns on user
+lingering so it survives reboots and starts before you log in. It captures
+`AWS_PROFILE` / `AWS_REGION` from your shell (override with `--profile` /
+`--region`). The daemon stores its SQLite db under
+`~/.local/share/citadel/citadel-logs.db` and serves the dashboard on
+`127.0.0.1:5500`.
+
+Other commands:
+
+```bash
+citadel logs-daemon status            # is it running?
+citadel logs-daemon logs              # tail the journal (-n N, --no-follow)
+citadel logs-daemon restart           # re-install unit + restart
+citadel logs-daemon stop [--disable]  # stop (and optionally disable autostart)
+```
+
+On non-Linux platforms, use the Docker path instead:
+`docker compose -f docker-compose.logs.yml up -d`.
 
 ## Roadmap
 
