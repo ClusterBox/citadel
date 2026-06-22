@@ -2,6 +2,9 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -44,4 +47,27 @@ RestartSec=5
 [Install]
 WantedBy=default.target
 `, o.BinaryPath, o.RegistryPath, o.DBPath, o.Addr, env.String())
+}
+
+// resolveLogsBinaryIn finds the citadel-logs binary, preferring a sibling of
+// the running citadel executable, then falling back to PATH.
+func resolveLogsBinaryIn(exeDir string, lookPath func(string) (string, error)) (string, error) {
+	if exeDir != "" {
+		cand := filepath.Join(exeDir, "citadel-logs")
+		if fi, err := os.Stat(cand); err == nil && !fi.IsDir() {
+			return cand, nil
+		}
+	}
+	if p, err := lookPath("citadel-logs"); err == nil {
+		return p, nil
+	}
+	return "", fmt.Errorf("citadel-logs binary not found next to citadel or on PATH; run `make install`")
+}
+
+func resolveLogsBinary() (string, error) {
+	exeDir := ""
+	if exe, err := os.Executable(); err == nil {
+		exeDir = filepath.Dir(exe)
+	}
+	return resolveLogsBinaryIn(exeDir, exec.LookPath)
 }
