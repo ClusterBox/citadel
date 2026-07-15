@@ -68,11 +68,19 @@ func (c *Client) SyncSecrets(ctx context.Context, cfg *config.DeployConfig, envN
 	return result, nil
 }
 
+// SecretPrefix returns the env-namespaced SSM prefix ("/<name>-<envName>",
+// e.g. /smaug-dev) that secretParamName nests keys under. Exported so the
+// deploy pipeline can emit it as CITADEL_SSM_PREFIX; keeping the derivation
+// here means the manifest can never drift from where SyncSecrets writes.
+func SecretPrefix(cfg *config.DeployConfig, envName string) string {
+	return fmt.Sprintf("/%s", cfg.ResolvedName(envName))
+}
+
 // secretParamName builds the env-namespaced SSM parameter path for a secret:
 // "/<name>-<envName>/<KEY>" (e.g. /legolas-dev/DATABASE_URL). Keeping this in
 // one place means the convention matches the CDK construct's SSM prefix.
 func secretParamName(cfg *config.DeployConfig, envName, secretName string) string {
-	return fmt.Sprintf("/%s/%s", cfg.ResolvedName(envName), secretName)
+	return fmt.Sprintf("%s/%s", SecretPrefix(cfg, envName), secretName)
 }
 
 // getParameter retrieves a parameter value from SSM
