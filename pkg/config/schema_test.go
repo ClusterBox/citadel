@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -171,5 +173,85 @@ func TestValidate_MalformedProduceArnFails(t *testing.T) {
 	}
 	if got := err.Error(); !strings.Contains(got, "queues.produce[0]") {
 		t.Fatalf("expected error to name queues.produce[0], got %q", got)
+	}
+}
+
+func TestValidate_EnvIsOptional(t *testing.T) {
+	cfg := baseValidConfig()
+	cfg.Env = nil
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected nil error with no env block, got %v", err)
+	}
+}
+
+func TestValidate_EnvAcceptedOnBothRuntimes(t *testing.T) {
+	ecsCfg := baseValidConfig()
+	ecsCfg.Env = map[string]string{"AWS_COGNITO_REGION": "us-east-1"}
+	if err := ecsCfg.Validate(); err != nil {
+		t.Fatalf("ecs runtime: expected nil error, got %v", err)
+	}
+
+	lambdaCfg := &DeployConfig{
+		Name:    "smaug",
+		Region:  "us-east-1",
+		Runtime: RuntimeLambda,
+		Environments: map[string]EnvConfig{
+			"dev": {Account: "123456789012"},
+		},
+		Env: map[string]string{"AWS_COGNITO_REGION": "us-east-1"},
+	}
+	if err := lambdaCfg.Validate(); err != nil {
+		t.Fatalf("lambda runtime: expected nil error, got %v", err)
+	}
+}
+
+func TestValidate_EnvSecretsCollisionFails(t *testing.T) {
+	cfg := baseValidConfig() // Secrets: ["DATABASE_URL"]
+	cfg.Env = map[string]string{"DATABASE_URL": "postgres://plain"}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected error for key in both env and secrets, got nil")
+	}
+	if got := err.Error(); !strings.Contains(got, "DATABASE_URL") {
+		t.Fatalf("expected error to name the colliding key, got %q", got)
+	}
+}
+
+func TestValidate_EmptyEnvKeyFails(t *testing.T) {
+	cfg := baseValidConfig()
+	cfg.Env = map[string]string{"": "value"}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected error for empty env key, got nil")
+	}
+	if got := err.Error(); !strings.Contains(got, "env") {
+		t.Fatalf("expected error to mention env, got %q", got)
+	}
+}
+
+func TestLoad_ParsesEnvBlock(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "citadel.yml")
+	yml := `name: smaug
+region: us-east-1
+runtime: lambda
+environments:
+  dev:
+    account: "123456789012"
+env:
+  AWS_COGNITO_REGION: us-east-1
+  AWS_COGNITO_USER_POOL_ID: us-east-1_qc9ah3rjU
+secrets:
+  - DATABASE_URL
+`
+	if err := os.WriteFile(path, []byte(yml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := cfg.Env["AWS_COGNITO_USER_POOL_ID"]; got != "us-east-1_qc9ah3rjU" {
+		t.Fatalf("env not parsed: got %q", got)
 	}
 }

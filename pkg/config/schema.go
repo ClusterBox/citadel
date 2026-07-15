@@ -28,6 +28,7 @@ type DeployConfig struct {
 	Container    ContainerConfig      `yaml:"container"`
 	Environments map[string]EnvConfig `yaml:"environments"`
 	Secrets      []string             `yaml:"secrets"`
+	Env          map[string]string    `yaml:"env,omitempty"`
 	Queues       *QueuesConfig        `yaml:"queues,omitempty"`
 	ECS          *ECSConfig           `yaml:"ecs,omitempty"`
 	VPC          *VPCConfig           `yaml:"vpc,omitempty"`
@@ -168,6 +169,9 @@ func (c *DeployConfig) Validate() error {
 	default:
 		return fmt.Errorf("runtime %q: must be %q or %q", c.Runtime, RuntimeECS, RuntimeLambda)
 	}
+	if err := c.validateEnv(); err != nil {
+		return err
+	}
 	if err := c.validateQueues(); err != nil {
 		return err
 	}
@@ -188,6 +192,24 @@ func (c *DeployConfig) validateQueues() error {
 	for i, arn := range c.Queues.Produce {
 		if !isValidSQSARN(arn) {
 			return fmt.Errorf("queues.produce[%d]: %q is not a valid SQS ARN", i, arn)
+		}
+	}
+	return nil
+}
+
+// validateEnv checks the non-secret env: block. An absent block is valid.
+// A key may not be empty and may not also be declared under secrets: —
+// duplicated names are the collision ECS rejects mid-deploy; catching it at
+// config load fails faster.
+func (c *DeployConfig) validateEnv() error {
+	for k := range c.Env {
+		if k == "" {
+			return fmt.Errorf("env: keys must be non-empty")
+		}
+	}
+	for _, s := range c.Secrets {
+		if _, ok := c.Env[s]; ok {
+			return fmt.Errorf("%q is declared in both env and secrets; a name may only appear in one", s)
 		}
 	}
 	return nil
