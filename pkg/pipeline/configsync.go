@@ -1,10 +1,14 @@
 package pipeline
 
 import (
+	"context"
 	"fmt"
 	"maps"
 	"sort"
 	"strings"
+
+	"github.com/ClusterBox/citadel/internal/aws"
+	"github.com/ClusterBox/citadel/pkg/config"
 )
 
 // Manifest env vars: names of declared secrets (never values) and the SSM
@@ -73,4 +77,46 @@ func looksSecretish(key string) bool {
 		}
 	}
 	return false
+}
+
+// syncLambdaConfig applies citadel.yml's env: block and the secret manifest to
+// the function via read-merge-write. Runs right after UpdateFunctionCode: it
+// first waits for that update to settle (Lambda rejects concurrent updates
+// with ResourceConflictException), then merges so CDK-set keys survive —
+// UpdateFunctionConfiguration replaces the entire env map. When dryRun is set
+// it prints the diff and writes nothing (and skips the settle-wait, since no
+// code update was requested).
+func syncLambdaConfig(ctx context.Context, lc *aws.LambdaClient, cfg *config.DeployConfig, env string, dryRun bool) error {
+	fnName := cfg.ResolveFunctionName(env)
+	fmt.Printf("🔧 Syncing function config for %s...\n", fnName)
+
+	if !dryRun {
+		if err := lc.WaitForFunctionUpdated(ctx, fnName); err != nil {
+			return err
+		}
+	}
+
+	existing, err := lc.GetFunctionEnv(ctx, fnName)
+	if err != nil {
+		return err
+	}
+
+	merged, changed := MergedEnv(existing, cfg.Env, cfg.Secrets, aws.SecretPrefix(cfg, env))
+	if !changed {
+		fmt.Printf("   Environment unchanged (%d vars)\n", len(merged))
+		return nil
+	}
+
+	for _, line := range EnvDiff(existing, merged) {
+		fmt.Printf("   %s\n", line)
+	}
+	if dryRun {
+		fmt.Printf("   [dry-run] Would update function environment (%d vars)\n", len(merged))
+		return nil
+	}
+	if err := lc.UpdateFunctionEnv(ctx, fnName, merged); err != nil {
+		return err
+	}
+	fmt.Printf("   Environment updated (%d vars)\n", len(merged))
+	return nil
 }
