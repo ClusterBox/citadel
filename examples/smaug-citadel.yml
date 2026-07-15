@@ -20,8 +20,19 @@ environments:
     # prod account ID not yet synthesised; replace before deploying to prod.
     account: "REPLACE_WITH_PROD_ACCOUNT_ID"
 
-# Secret env-var names synced to SSM via smaug/scripts/sync-secrets.sh.
-# Each value is stored at /smaug/<stage>/<VAR_NAME> as a SecureString.
+# Non-secret env vars injected onto the function by `citadel deploy`
+# (UpdateFunctionConfiguration). Public identifiers, safe to commit — the
+# shared Cognito pool/app-client used by both dev and prod, which is why no
+# per-env override is needed. Changing one of these is a citadel.yml edit +
+# `citadel deploy`, no `cdk deploy`.
+env:
+  AWS_COGNITO_REGION: us-east-1
+  AWS_COGNITO_USER_POOL_ID: us-east-1_qc9ah3rjU
+  AWS_COGNITO_CLIENT_ID: 5lvad3v3prppd0bup32a3adsvb
+
+# Secret env-var names synced to SSM by `citadel deploy --env-file <env>.env`
+# as SecureString under /smaug-<env>/<VAR_NAME> (see CITADEL_SSM_PREFIX).
+# The function loads them at boot via the CITADEL_SECRETS manifest.
 secrets:
   - DATABASE_URL
   - PAYSTACK_SECRET_KEY
