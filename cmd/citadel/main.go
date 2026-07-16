@@ -51,6 +51,7 @@ Single source of truth: citadel.yml defines everything about your deployment.`,
 			envFile, _ := cmd.Flags().GetString("env-file")
 			deployInfra, _ := cmd.Flags().GetBool("deploy-infra")
 			skipSSM, _ := cmd.Flags().GetBool("skip-ssm")
+			skipConfig, _ := cmd.Flags().GetBool("skip-config")
 			wait, _ := cmd.Flags().GetBool("wait")
 			streamLogs, _ := cmd.Flags().GetBool("stream-logs")
 			tailLines, _ := cmd.Flags().GetInt("tail")
@@ -62,6 +63,7 @@ Single source of truth: citadel.yml defines everything about your deployment.`,
 				EnvFile:     envFile,
 				DeployInfra: deployInfra,
 				SkipSSM:     skipSSM,
+				SkipConfig:  skipConfig,
 				DryRun:      dryRun,
 				Wait:        wait,
 				StreamLogs:  streamLogs,
@@ -76,6 +78,7 @@ Single source of truth: citadel.yml defines everything about your deployment.`,
 	deployCmd.Flags().String("env-file", ".env", "Path to .env file")
 	deployCmd.Flags().Bool("deploy-infra", false, "Deploy/update CDK infrastructure")
 	deployCmd.Flags().Bool("skip-ssm", false, "Skip syncing secrets to SSM Parameter Store")
+	deployCmd.Flags().Bool("skip-config", false, "Skip syncing env/config to the Lambda function")
 	deployCmd.Flags().Bool("wait", false, "Wait for deployment to stabilize")
 	deployCmd.Flags().Bool("stream-logs", false, "Stream CloudWatch logs after deployment")
 	deployCmd.Flags().Int("tail", 100, "Number of log lines to show initially")

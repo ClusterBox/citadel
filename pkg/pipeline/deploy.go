@@ -21,6 +21,7 @@ type DeployOptions struct {
 	EnvFile     string
 	DeployInfra bool
 	SkipSSM     bool
+	SkipConfig  bool
 	DryRun      bool
 	StreamLogs  bool
 	Wait        bool
@@ -115,6 +116,14 @@ func Deploy(ctx context.Context, opts *DeployOptions) error {
 			finish(err)
 			return fmt.Errorf("failed to update %s: %w", runtime, err)
 		}
+		if runtime == config.RuntimeLambda {
+			if opts.SkipConfig {
+				fmt.Printf("⏭️  Skipping function config sync (--skip-config)\n")
+			} else if err := syncLambdaConfig(ctx, awsClient.NewLambdaClient(), cfg, opts.Environment, false); err != nil {
+				finish(err)
+				return fmt.Errorf("failed to sync function config: %w", err)
+			}
+		}
 		if opts.Wait {
 			if err := deployer.WaitStable(ctx, cfg, opts.Environment); err != nil {
 				finish(err)
@@ -122,6 +131,17 @@ func Deploy(ctx context.Context, opts *DeployOptions) error {
 			}
 		}
 		finish(nil)
+		fmt.Printf("\n")
+	}
+
+	if opts.DryRun && cfg.ResolvedRuntime() == config.RuntimeLambda && !opts.SkipConfig {
+		awsClient, err := aws.NewClient(ctx, cfg.Region)
+		if err != nil {
+			return fmt.Errorf("failed to create AWS client: %w", err)
+		}
+		if err := syncLambdaConfig(ctx, awsClient.NewLambdaClient(), cfg, opts.Environment, true); err != nil {
+			return fmt.Errorf("failed to diff function config: %w", err)
+		}
 		fmt.Printf("\n")
 	}
 
