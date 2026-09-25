@@ -120,3 +120,12 @@ EOF
   expected=$'deploy\n--env\ndev\n-m\nship it\n--env-file\n'"$(cat "$FAKE_DIR/env_path")"$'\n--wait'
   [ "$(cat "$FAKE_DIR/args")" = "$expected" ]
 }
+
+@test "a missing non-default config path is still passed so citadel fails loudly" {
+  export CITADEL_CONFIG="services/api/citadel.yml"
+  export CITADEL_ENV_FILE_CONTENT="A=b"
+  run bash "$SCRIPTS/deploy.sh"
+  [ "$status" -eq 0 ]
+  grep -qx -- '--config' "$FAKE_DIR/args"
+  grep -qx -- 'services/api/citadel.yml' "$FAKE_DIR/args"
+}

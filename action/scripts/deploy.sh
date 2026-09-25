@@ -15,9 +15,12 @@ if [[ -z "$message" ]]; then
 fi
 
 args=(deploy)
-# Only pass --config when the file exists; otherwise let citadel apply its own
-# citadel.yml -> citadel.yaml fallback.
-if [[ -f "$config" ]]; then
+# Only omit --config for the default citadel.yml when it doesn't exist, so
+# citadel's own citadel.yml -> citadel.yaml fallback applies. Any other
+# (non-default) config path is always passed through, so a mistyped path
+# fails loudly in citadel instead of silently falling back to ./citadel.yml.
+default_config="citadel.yml"
+if [[ "$config" != "$default_config" || -f "$config" ]]; then
   args+=(--config "$config")
 fi
 args+=(--env "$env_name" -m "$message")
