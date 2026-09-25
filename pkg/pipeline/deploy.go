@@ -75,8 +75,9 @@ func Deploy(ctx context.Context, opts *DeployOptions) (retErr error) {
 		Target:     resolveTarget(cfg, opts.Environment),
 		DeployedBy: currentUser(),
 	}
-	// Finish is idempotent: this records the outcome on every early return.
-	defer func() { run.Finish(retErr, state) }()
+	// Finish is idempotent: this records the outcome on every early return,
+	// including a panic (finishRun turns it into a failed run and re-panics).
+	defer finishRun(run, &retErr, &state)
 
 	// 2. Sync secrets to SSM (unless --skip-ssm)
 	if !opts.SkipSSM && opts.EnvFile != "" {
@@ -168,6 +169,18 @@ func Deploy(ctx context.Context, opts *DeployOptions) (retErr error) {
 	}
 
 	return nil
+}
+
+// finishRun records a deploy's outcome via run.Finish, called directly as a
+// defer so recover works. A panic unwinding through Deploy would otherwise
+// leave *errp nil and record success; instead it is recorded as a failed run
+// and re-panicked so the caller still sees it.
+func finishRun(run *project.Run, errp *error, state *project.State) {
+	if p := recover(); p != nil {
+		run.Finish(fmt.Errorf("panic: %v", p), *state)
+		panic(p)
+	}
+	run.Finish(*errp, *state)
 }
 
 // openRun returns the Run that records this deploy under .citadel/ next to

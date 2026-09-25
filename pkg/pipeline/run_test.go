@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -72,5 +73,52 @@ func TestOpenRun_UnwritableDirDegradesWithOneWarning(t *testing.T) {
 	}
 	if strings.Count(out.String(), "run logging disabled") != 1 {
 		t.Fatalf("output = %q", out.String())
+	}
+}
+
+// TestFinishRun_PanicRecordsFailedAndRePanics guards against a panicking
+// deploy being recorded as success: during panic unwinding retErr is nil, so
+// a plain `defer run.Finish(retErr, state)` would write "success" to
+// run.json and state/<env>.json even though the deploy crashed.
+func TestFinishRun_PanicRecordsFailedAndRePanics(t *testing.T) {
+	dir := t.TempDir()
+	d, err := project.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var term bytes.Buffer
+	run, err := d.NewRun(project.RunInfo{Env: "dev"}, &term)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var retErr error
+	state := project.State{}
+	func() {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Fatal("expected the panic to propagate past finishRun")
+			}
+		}()
+		defer finishRun(run, &retErr, &state)
+		panic("boom")
+	}()
+
+	data, err := os.ReadFile(filepath.Join(run.Dir(), "run.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rf struct {
+		Status string `json:"status"`
+		Error  string `json:"error"`
+	}
+	if err := json.Unmarshal(data, &rf); err != nil {
+		t.Fatal(err)
+	}
+	if rf.Status != project.StatusFailed {
+		t.Fatalf("status = %q, want %q", rf.Status, project.StatusFailed)
+	}
+	if !strings.Contains(rf.Error, "boom") {
+		t.Fatalf("error = %q, want it to mention the panic value", rf.Error)
 	}
 }
