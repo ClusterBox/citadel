@@ -48,7 +48,7 @@ Single source of truth: citadel.yml defines everything about your deployment.`,
 	// deploy command
 	deployCmd := &cobra.Command{
 		Use:   "deploy",
-		Short: "Full deployment pipeline (sync + infra? + build + deploy)",
+		Short: "Full deployment pipeline (sync + build + infra? + deploy)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if environment == "" {
 				return fmt.Errorf("--env is required")
