@@ -20,7 +20,7 @@ inputs:
     required: false
     default: 'false'
   deploy-infra:
-    description: Also run cdk deploy (passes --deploy-infra); installs Node 20, the aws-cdk CLI and Go for cdk/go.mod.
+    description: Also run cdk deploy (passes --deploy-infra); installs Node 22, the aws-cdk CLI and Go for cdk/go.mod.
     required: false
     default: 'false'
   wait:
@@ -105,7 +105,7 @@ runs:
     - if: inputs.install-only != 'true' && inputs.deploy-infra == 'true'
       uses: actions/setup-node@v4
       with:
-        node-version: '20'
+        node-version: '22'
 
     - if: inputs.install-only != 'true' && inputs.deploy-infra == 'true'
       shell: bash
@@ -147,6 +147,7 @@ runs:
         name: citadel-run-${{ steps.env.outputs.environment }}-${{ steps.run.outputs.run-id }}
         path: ${{ steps.run.outputs.run-dir }}
         if-no-files-found: ignore
+        retention-days: 30
 
     - if: always() && inputs.install-only != 'true'
       shell: bash
