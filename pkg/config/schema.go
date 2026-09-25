@@ -33,6 +33,7 @@ type DeployConfig struct {
 	ECS          *ECSConfig           `yaml:"ecs,omitempty"`
 	VPC          *VPCConfig           `yaml:"vpc,omitempty"`
 	CloudFront   *CloudFrontConfig    `yaml:"cloudfront,omitempty"`
+	Pipeline     []PipelineStep       `yaml:"pipeline,omitempty"`
 }
 
 // LambdaConfig declares Lambda-specific metadata. functionName is optional;
@@ -178,6 +179,9 @@ func (c *DeployConfig) Validate() error {
 		return err
 	}
 	if err := c.validateQueues(); err != nil {
+		return err
+	}
+	if err := c.validatePipeline(); err != nil {
 		return err
 	}
 	return nil
