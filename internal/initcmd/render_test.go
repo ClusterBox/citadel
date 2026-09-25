@@ -110,6 +110,36 @@ func TestRender_RoundTrip(t *testing.T) {
 	}
 }
 
+// TestRender_YAMLReservedWordsRoundTrip guards against name/env keys being
+// emitted unquoted: a directory (or env) literally called "null", "true" or
+// "yes" would otherwise render a YAML keyword instead of a string, and the
+// rendered citadel.yml would fail Render's own config.Parse check ("this is
+// a citadel bug") or silently round-trip to the wrong Go type.
+func TestRender_YAMLReservedWordsRoundTrip(t *testing.T) {
+	for _, word := range []string{"null", "true", "yes"} {
+		t.Run(word, func(t *testing.T) {
+			v := validECS()
+			v.Name = word
+			v.Envs = []string{word}
+
+			out, err := Render(v, "vTEST")
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := config.Parse(out)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.Name != word {
+				t.Fatalf("name = %q, want %q", cfg.Name, word)
+			}
+			if _, ok := cfg.Environments[word]; !ok {
+				t.Fatalf("environments missing key %q: %v", word, cfg.Environments)
+			}
+		})
+	}
+}
+
 func TestRender_RejectsInvalidValues(t *testing.T) {
 	v := validECS()
 	v.Account = "123"

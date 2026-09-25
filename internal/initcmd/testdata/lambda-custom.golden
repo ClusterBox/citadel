@@ -5,7 +5,7 @@
 # and points the function at it. Prerequisites: that repository and the
 # function must already exist (create them with your CDK stack).
 
-name: smaug
+name: "smaug"
 region: eu-west-1
 runtime: lambda
 
@@ -15,9 +15,9 @@ lambda:
 
 # One entry per environment you deploy with `citadel deploy --env <name>`.
 environments:
-  dev:
+  "dev":
     account: "111111111111"
-  prod:
+  "prod":
     account: "111111111111"
 
 # Non-secret env vars set on the function by `citadel deploy`, safe to commit.

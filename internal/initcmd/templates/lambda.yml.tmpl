@@ -5,7 +5,7 @@
 # and points the function at it. Prerequisites: that repository and the
 # function must already exist (create them with your CDK stack).
 
-name: {{.Name}}
+name: "{{.Name}}"
 region: {{.Region}}
 runtime: lambda
 {{- if .FunctionName}}
@@ -24,7 +24,7 @@ lambda:
 # One entry per environment you deploy with `citadel deploy --env <name>`.
 environments:
 {{- range .EnvList}}
-  {{.Name}}:
+  "{{.Name}}":
     account: "{{.Account}}"
 {{- end}}
 

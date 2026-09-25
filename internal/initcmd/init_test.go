@@ -362,7 +362,7 @@ func TestRun_DryRunWritesNothing(t *testing.T) {
 		t.Fatalf("dry run wrote: %v", names)
 	}
 	s := out.String()
-	if !strings.Contains(s, "name: svc") || !strings.Contains(s, project.DirName) {
+	if !strings.Contains(s, `name: "svc"`) || !strings.Contains(s, project.DirName) {
 		t.Fatalf("dry-run output missing config or .citadel plan:\n%s", s)
 	}
 }

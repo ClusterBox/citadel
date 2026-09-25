@@ -5,7 +5,7 @@
 # (my-api-dev-cluster, -service, -repo, log group, SSM prefix),
 # so environments stay isolated even inside one AWS account.
 
-name: my-api
+name: "my-api"
 region: us-east-1
 runtime: ecs
 
@@ -21,11 +21,11 @@ container:
 # One entry per environment you deploy with `citadel deploy --env <name>`.
 # min_capacity is the desired task count; max_capacity caps autoscaling.
 environments:
-  dev:
+  "dev":
     account: "111111111111"
     min_capacity: 1
     max_capacity: 2
-  prod:
+  "prod":
     account: "111111111111"
     min_capacity: 1
     max_capacity: 2
