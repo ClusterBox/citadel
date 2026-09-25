@@ -322,6 +322,11 @@ func collect(ctx context.Context, opts Options, p Prompter, d Detector) (Values,
 	}
 
 	if !opts.Provided[FlagAccount] && v.Account == "" {
+		if interactive {
+			// STS detection can take up to 10s (envDetector.Account); without
+			// this, an interactive `citadel init` sits silent that whole time.
+			fmt.Fprintf(opts.Out, "Detecting AWS account…\n")
+		}
 		acct, err := d.Account(ctx, v.Region)
 		switch {
 		case err == nil:
