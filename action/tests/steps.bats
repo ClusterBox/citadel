@@ -52,11 +52,14 @@ setup() {
   run bash "$SCRIPTS/cdk-go-mod.sh"
   [ "$status" -eq 0 ]
   grep -q '^go-mod=' "$GITHUB_OUTPUT"
-  ! grep -q '^go-sum=' "$GITHUB_OUTPUT"
+  run grep -q '^go-sum=' "$GITHUB_OUTPUT"
+  [ "$status" -ne 0 ]
 }
 
 @test "locate-run finds the newest run and the image from state" {
   w="$BATS_TEST_TMPDIR/w"; mkdir -p "$w/.citadel/runs/20260925T100000Z-aaaa" "$w/.citadel/runs/20260925T110000Z-bbbb" "$w/.citadel/state"
+  echo '{"env":"dev"}' > "$w/.citadel/runs/20260925T100000Z-aaaa/run.json"
+  echo '{"env":"dev"}' > "$w/.citadel/runs/20260925T110000Z-bbbb/run.json"
   echo '{"image_uri":"repo:abc"}' > "$w/.citadel/state/dev.json"
   export CITADEL_WORKING_DIRECTORY="$w" CITADEL_CONFIG=citadel.yml CITADEL_ENV=dev
   run bash "$SCRIPTS/locate-run.sh"
@@ -64,6 +67,26 @@ setup() {
   grep -qx "run-id=20260925T110000Z-bbbb" "$GITHUB_OUTPUT"
   grep -qx "run-dir=$w/./.citadel/runs/20260925T110000Z-bbbb" "$GITHUB_OUTPUT" || grep -qx "run-dir=$w/.citadel/runs/20260925T110000Z-bbbb" "$GITHUB_OUTPUT"
   grep -qx "image-uri=repo:abc" "$GITHUB_OUTPUT"
+}
+
+@test "locate-run picks the newest run of the deployed environment, not a newer run of another" {
+  w="$BATS_TEST_TMPDIR/w3"; mkdir -p "$w/.citadel/runs/20260925T100000Z-aaaa" "$w/.citadel/runs/20260925T110000Z-bbbb"
+  echo '{"env":"dev"}' > "$w/.citadel/runs/20260925T100000Z-aaaa/run.json"
+  echo '{"env":"prod"}' > "$w/.citadel/runs/20260925T110000Z-bbbb/run.json"
+  export CITADEL_WORKING_DIRECTORY="$w" CITADEL_CONFIG=citadel.yml CITADEL_ENV=dev
+  run bash "$SCRIPTS/locate-run.sh"
+  [ "$status" -eq 0 ]
+  grep -qx "run-id=20260925T100000Z-aaaa" "$GITHUB_OUTPUT"
+}
+
+@test "locate-run without an environment keeps picking the newest run" {
+  w="$BATS_TEST_TMPDIR/w4"; mkdir -p "$w/.citadel/runs/20260925T100000Z-aaaa" "$w/.citadel/runs/20260925T110000Z-bbbb"
+  echo '{"env":"dev"}' > "$w/.citadel/runs/20260925T100000Z-aaaa/run.json"
+  echo '{"env":"prod"}' > "$w/.citadel/runs/20260925T110000Z-bbbb/run.json"
+  export CITADEL_WORKING_DIRECTORY="$w" CITADEL_CONFIG=citadel.yml CITADEL_ENV=""
+  run bash "$SCRIPTS/locate-run.sh"
+  [ "$status" -eq 0 ]
+  grep -qx "run-id=20260925T110000Z-bbbb" "$GITHUB_OUTPUT"
 }
 
 @test "locate-run writes empty outputs when citadel never started a run" {

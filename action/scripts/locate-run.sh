@@ -7,7 +7,18 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 citadel_dir="${CITADEL_WORKING_DIRECTORY:-.}/$(dirname "${CITADEL_CONFIG:-citadel.yml}")/.citadel"
 run_dir=""
 if [[ -d "$citadel_dir/runs" ]]; then
-  run_dir="$(find "$citadel_dir/runs" -mindepth 1 -maxdepth 1 -type d -name '*T*Z-*' | sort | tail -n 1)"
+  if [[ -z "${CITADEL_ENV:-}" ]]; then
+    run_dir="$(find "$citadel_dir/runs" -mindepth 1 -maxdepth 1 -type d -name '*T*Z-*' | sort | tail -n 1)"
+  else
+    # Newest run of this environment: a newer run of another environment
+    # (e.g. a laptop deploy in the same checkout) must not be reported.
+    while IFS= read -r dir; do
+      if [[ "$(jq -r '.env // ""' "$dir/run.json" 2>/dev/null)" == "$CITADEL_ENV" ]]; then
+        run_dir="$dir"
+        break
+      fi
+    done < <(find "$citadel_dir/runs" -mindepth 1 -maxdepth 1 -type d -name '*T*Z-*' | sort -r)
+  fi
 fi
 run_id=""
 if [[ -n "$run_dir" ]]; then
