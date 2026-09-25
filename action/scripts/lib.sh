@@ -143,20 +143,36 @@ env_file_values() {
   done < "$1"
 }
 
-# mask_env_file FILE — emits a workflow command masking every value in FILE.
-# Each value is escaped like @actions/core's escapeData before being placed
-# in the ::add-mask:: command, in order: '%' -> '%25', then CR -> '%0D', then
-# LF -> '%0A'. Without this a value containing a literal "%25" would be
-# masked as its decoded form, and a masked value spanning "lines" (CR/LF)
-# would break the single-line workflow command.
+# add_mask S — emits "::add-mask::S" unless S is shorter than 3 characters
+# (a lone "=" or "ab" mask would star out unrelated log text). S is escaped
+# like @actions/core's escapeData first, in order: '%' -> '%25', then
+# CR -> '%0D', then LF -> '%0A'. Without this a value containing a literal
+# "%25" would be masked as its decoded form, and a masked value spanning
+# "lines" (CR/LF) would break the single-line workflow command.
+add_mask() {
+  local v="$1" escaped
+  (( ${#v} >= 3 )) || return 0
+  escaped="${v//%/%25}"
+  escaped="${escaped//$'\r'/%0D}"
+  escaped="${escaped//$'\n'/%0A}"
+  printf '::add-mask::%s\n' "$escaped"
+}
+
+# mask_env_file FILE — emits workflow commands masking every value in FILE
+# (see env_file_values), then every whole trimmed non-blank, non-comment
+# KEY=VALUE line, so a line that only looks like KEY=VALUE (e.g. a base64
+# continuation "abc==") is still masked in full. Lines without "=" are
+# already masked as values. Masks shorter than 3 characters are skipped.
 mask_env_file() {
-  local v escaped
+  local v line
   while IFS= read -r v; do
-    escaped="${v//%/%25}"
-    escaped="${escaped//$'\r'/%0D}"
-    escaped="${escaped//$'\n'/%0A}"
-    printf '::add-mask::%s\n' "$escaped"
+    add_mask "$v"
   done < <(env_file_values "$1")
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="$(trim "$line")"
+    [[ -z "$line" || "$line" == \#* || "$line" != *=* ]] && continue
+    add_mask "$line"
+  done < "$1"
 }
 
 # render_summary RUN_JSON IMAGE_URI — markdown job summary for a citadel run.

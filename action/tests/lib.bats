@@ -123,18 +123,29 @@ EOF
   [ "$output" = "$expected" ]
 }
 
-@test "mask_env_file emits one add-mask command per value" {
+@test "mask_env_file masks every value, then every whole line, skipping masks under 3 characters" {
   f="$BATS_TEST_TMPDIR/.env"
-  printf 'A=one\nB=\nC="two"\n' > "$f"
+  printf 'A=one\nB=\nC="two"\nD=xy\n' > "$f"
   run mask_env_file "$f"
-  [ "$output" = $'::add-mask::one\n::add-mask::two' ]
+  [ "$output" = $'::add-mask::one\n::add-mask::two\n::add-mask::A=one\n::add-mask::C="two"\n::add-mask::D=xy' ]
 }
 
 @test "mask_env_file escapes a literal percent-encoded sequence like @actions/core" {
   f="$BATS_TEST_TMPDIR/.env"
   printf 'P=p%%25w\n' > "$f"
   run mask_env_file "$f"
-  [ "$output" = '::add-mask::p%2525w' ]
+  [ "$output" = $'::add-mask::p%2525w\n::add-mask::P=p%2525w' ]
+}
+
+@test "mask_env_file never masks a lone '=' from a base64-looking line, but masks the whole line" {
+  f="$BATS_TEST_TMPDIR/.env"
+  printf 'abc==\n' > "$f"
+  run mask_env_file "$f"
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" > "$BATS_TEST_TMPDIR/masks"
+  [ "$output" = '::add-mask::abc==' ]
+  run grep -qxF -- '::add-mask::=' "$BATS_TEST_TMPDIR/masks"
+  [ "$status" -ne 0 ]
 }
 
 @test "env_file_values treats a non-comment line without '=' as a value (pasted secret continuation)" {
@@ -145,7 +156,7 @@ EOF
   [ "$output" = $'one\nMIIBorphanline' ]
 
   run mask_env_file "$f"
-  [[ "$output" == *"::add-mask::MIIBorphanline"* ]]
+  [ "$output" = $'::add-mask::one\n::add-mask::MIIBorphanline\n::add-mask::A=one' ]
 }
 
 @test "render_summary renders a failed run with its error" {
