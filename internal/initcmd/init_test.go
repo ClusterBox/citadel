@@ -410,6 +410,18 @@ func TestRun_InteractiveAccountPromptWhenDetectionFails(t *testing.T) {
 	}
 }
 
+func TestRun_InteractivePortOutOfRangeRejected(t *testing.T) {
+	opts, _ := newOpts(t, "svc")
+	opts.Yes = false
+	opts.Values.Secrets = []string{"DATABASE_URL"}
+	p := &fakePrompter{answers: map[string]string{titlePort: "70000"}}
+
+	err := Run(context.Background(), opts, p, okDetector)
+	if err == nil || !strings.Contains(err.Error(), "rejected") {
+		t.Fatalf("error = %v, want the fake prompter's rejection for an out-of-range port", err)
+	}
+}
+
 func TestRun_ProvidedFlagsAreNotPrompted(t *testing.T) {
 	opts, _ := newOpts(t, "svc")
 	opts.Yes = false

@@ -276,9 +276,9 @@ func collect(ctx context.Context, opts Options, p Prompter, d Detector) (Values,
 		*cur = strings.TrimSpace(s)
 		return nil
 	}
-	inputInt := func(flag, title string, cur *int) error {
+	inputInt := func(flag, title string, cur *int, validate func(string) error) error {
 		s := strconv.Itoa(*cur)
-		if err := input(flag, title, &s, validatePositiveInt); err != nil {
+		if err := input(flag, title, &s, validate); err != nil {
 			return err
 		}
 		n, err := strconv.Atoi(s)
@@ -340,13 +340,13 @@ func collect(ctx context.Context, opts Options, p Prompter, d Detector) (Values,
 
 	switch v.Runtime {
 	case config.RuntimeECS:
-		if err := inputInt(FlagPort, titlePort, &v.Port); err != nil {
+		if err := inputInt(FlagPort, titlePort, &v.Port, validatePort); err != nil {
 			return v, err
 		}
-		if err := inputInt(FlagCPU, titleCPU, &v.CPU); err != nil {
+		if err := inputInt(FlagCPU, titleCPU, &v.CPU, validatePositiveInt); err != nil {
 			return v, err
 		}
-		if err := inputInt(FlagMemory, titleMemory, &v.Memory); err != nil {
+		if err := inputInt(FlagMemory, titleMemory, &v.Memory, validatePositiveInt); err != nil {
 			return v, err
 		}
 		if err := input(FlagHealthCheckPath, titleHealth, &v.HealthCheckPath, ValidateHealthCheckPath); err != nil {
@@ -388,6 +388,17 @@ func validatePositiveInt(s string) error {
 	n, err := strconv.Atoi(strings.TrimSpace(s))
 	if err != nil || n <= 0 {
 		return fmt.Errorf("%q: enter a positive whole number", s)
+	}
+	return nil
+}
+
+// validatePort rejects a container port outside the valid TCP range, so a
+// value like 70000 is caught at the prompt instead of failing Render's
+// config.Parse check after every other prompt has already been answered.
+func validatePort(s string) error {
+	n, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil || n < 1 || n > 65535 {
+		return fmt.Errorf("%q: enter a port between 1 and 65535", s)
 	}
 	return nil
 }
