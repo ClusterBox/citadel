@@ -124,11 +124,18 @@ strip_quote_chars() {
 # env_file_values FILE — prints each non-empty value in FILE, one per line,
 # parsed exactly as internal/env.Load does: trim the line, skip blanks and
 # "#" comments, split on the first "=", trim the value, strip quote chars.
+# A trimmed, non-empty, non-comment line with no "=" is most likely the
+# continuation of a pasted multi-line secret (e.g. a PEM key); it is printed
+# as-is so mask_env_file still masks it.
 env_file_values() {
   local line value
   while IFS= read -r line || [[ -n "$line" ]]; do
     line="$(trim "$line")"
-    [[ -z "$line" || "$line" == \#* || "$line" != *=* ]] && continue
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    if [[ "$line" != *=* ]]; then
+      printf '%s\n' "$line"
+      continue
+    fi
     value="$(strip_quote_chars "$(trim "${line#*=}")")"
     if [[ -n "$value" ]]; then
       printf '%s\n' "$value"
@@ -149,7 +156,7 @@ render_summary() {
   jq -r --arg image "$2" '
     def dur: if .status == "skipped" then "–"
              else "\(((.duration_ms // 0) / 100 | round) / 10)s" end;
-    def cell: tostring | gsub("\\|"; "\\|") | gsub("\n"; " ");
+    def cell: tostring | gsub("\\|"; "\\|") | gsub("`"; "\\`") | gsub("\n"; " ");
     "### citadel deploy: \(.env) — \(.status)",
     "",
     "- **Run:** `\(.id)`",

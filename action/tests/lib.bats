@@ -120,6 +120,17 @@ EOF
   [ "$output" = $'::add-mask::one\n::add-mask::two' ]
 }
 
+@test "env_file_values treats a non-comment line without '=' as a value (pasted secret continuation)" {
+  f="$BATS_TEST_TMPDIR/.env"
+  printf 'A=one\nMIIBorphanline\n# comment\n' > "$f"
+  run env_file_values "$f"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'one\nMIIBorphanline' ]
+
+  run mask_env_file "$f"
+  [[ "$output" == *"::add-mask::MIIBorphanline"* ]]
+}
+
 @test "render_summary renders a failed run with its error" {
   f="$BATS_TEST_TMPDIR/run.json"
   cat > "$f" <<'EOF'
@@ -149,4 +160,14 @@ EOF
   echo '{"id":"r","env":"dev","git_sha":"s","status":"success","steps":[]}' > "$f"
   run render_summary "$f" ""
   [[ "$output" != *"Image"* ]]
+}
+
+@test "render_summary escapes a backtick in the error cell" {
+  f="$BATS_TEST_TMPDIR/run.json"
+  cat > "$f" <<'EOF'
+{"id":"r","env":"dev","git_sha":"s","status":"failed","steps":[{"name":"build","status":"failed","duration_ms":1000,"error":"unexpected ` token"}]}
+EOF
+  run render_summary "$f" ""
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'unexpected \` token'* ]]
 }
