@@ -263,7 +263,7 @@ func (r *Run) disableLocked(err error) {
 		return
 	}
 	r.dir = ""
-	fmt.Fprintf(r.term, "   ⚠️  run log disabled: %v\n", err)
+	fmt.Fprintf(r.term, "   ⚠️  run logging disabled: %v\n", err)
 }
 
 // teeWriter mirrors writes to the terminal and a step's log file. Callers see

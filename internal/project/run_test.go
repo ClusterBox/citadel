@@ -235,7 +235,7 @@ func TestRun_UnwritableRunDirDegradesToTerminal(t *testing.T) {
 	if !strings.Contains(out, "still here\n") {
 		t.Fatalf("terminal lost output: %q", out)
 	}
-	if strings.Count(out, "run log disabled") != 1 {
+	if strings.Count(out, "run logging disabled") != 1 {
 		t.Fatalf("want exactly one warning, got %q", out)
 	}
 }
