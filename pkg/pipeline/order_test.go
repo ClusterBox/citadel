@@ -3,7 +3,6 @@ package pipeline
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -71,27 +70,6 @@ func (l *stageLog) stages() stages {
 
 const testImageURI = "111111111111.dkr.ecr.us-east-1.amazonaws.com/demo-dev-repo:abc1234"
 
-type runRecord struct {
-	Status string `json:"status"`
-	Steps  []struct {
-		Name   string `json:"name"`
-		Status string `json:"status"`
-	} `json:"steps"`
-}
-
-func readRun(t *testing.T, runDir string) runRecord {
-	t.Helper()
-	data, err := os.ReadFile(filepath.Join(runDir, "run.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var r runRecord
-	if err := json.Unmarshal(data, &r); err != nil {
-		t.Fatal(err)
-	}
-	return r
-}
-
 func onlyRun(t *testing.T, configPath string) runRecord {
 	t.Helper()
 	dirs, _ := filepath.Glob(filepath.Join(filepath.Dir(configPath), ".citadel", "runs", "*"))
@@ -99,14 +77,6 @@ func onlyRun(t *testing.T, configPath string) runRecord {
 		t.Fatalf("want exactly one run, found %v", dirs)
 	}
 	return readRun(t, dirs[0])
-}
-
-func stepSummary(r runRecord) []string {
-	var out []string
-	for _, s := range r.Steps {
-		out = append(out, s.Name+":"+s.Status)
-	}
-	return out
 }
 
 func deployOpts(configPath string, infra bool) *DeployOptions {
