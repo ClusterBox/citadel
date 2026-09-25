@@ -15,12 +15,12 @@ type Deployer interface {
 	WaitStable(ctx context.Context, w io.Writer, cfg *config.DeployConfig, env string) error
 }
 
-// ecsDeployer forces a new ECS deployment (the task definition already
-// references the :latest image just pushed).
+// ecsDeployer rolls the ECS service onto the pushed image by registering a new
+// task-definition revision (see aws.ECSClient.DeployImage).
 type ecsDeployer struct{ c *aws.ECSClient }
 
-func (d ecsDeployer) Update(ctx context.Context, w io.Writer, cfg *config.DeployConfig, env, _ string) error {
-	return d.c.UpdateService(ctx, w, cfg, env)
+func (d ecsDeployer) Update(ctx context.Context, w io.Writer, cfg *config.DeployConfig, env, imageURI string) error {
+	return d.c.DeployImage(ctx, w, cfg, env, imageURI)
 }
 
 func (d ecsDeployer) WaitStable(ctx context.Context, w io.Writer, cfg *config.DeployConfig, env string) error {

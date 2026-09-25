@@ -50,30 +50,6 @@ func resolveService(cfg *config.DeployConfig, env string) string {
 	return fmt.Sprintf("%s-service", cfg.ResolvedName(env))
 }
 
-// UpdateService triggers a new deployment for an ECS service
-func (ec *ECSClient) UpdateService(ctx context.Context, w io.Writer, cfg *config.DeployConfig, env string) error {
-	input := &ecs.UpdateServiceInput{
-		Cluster:            aws.String(resolveCluster(cfg, env)),
-		Service:            aws.String(resolveService(cfg, env)),
-		ForceNewDeployment: true,
-	}
-
-	output, err := ec.client.UpdateService(ctx, input)
-	if err != nil {
-		return fmt.Errorf("failed to update service: %w", err)
-	}
-
-	if output.Service == nil {
-		return fmt.Errorf("service update returned nil service")
-	}
-
-	fmt.Fprintf(w, "✅ Deployment triggered for service: %s\n", *output.Service.ServiceName)
-	fmt.Fprintf(w, "   Desired tasks: %d\n", output.Service.DesiredCount)
-	fmt.Fprintf(w, "   Running tasks: %d\n", output.Service.RunningCount)
-
-	return nil
-}
-
 // GetServiceStatus returns the current status of an ECS service
 func (ec *ECSClient) GetServiceStatus(ctx context.Context, cfg *config.DeployConfig, env string) error {
 	input := &ecs.DescribeServicesInput{

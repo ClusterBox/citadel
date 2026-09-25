@@ -1,0 +1,157 @@
+name: citadel deploy
+description: Deploy a service with citadel — build, push, optional CDK, roll out — from GitHub Actions.
+author: ClusterBox
+
+inputs:
+  environment:
+    description: citadel environment to deploy. Empty resolves it from the branch via branch-map.
+    required: false
+    default: ''
+  branch-map:
+    description: Comma-separated branch=env pairs used when environment is empty.
+    required: false
+    default: 'main=prod,development=dev'
+  env-file:
+    description: Contents of the .env file (pass a secret). Required unless skip-secrets is true.
+    required: false
+    default: ''
+  skip-secrets:
+    description: Skip syncing secrets to SSM (passes --skip-ssm).
+    required: false
+    default: 'false'
+  deploy-infra:
+    description: Also run cdk deploy (passes --deploy-infra); installs Node 22, the aws-cdk CLI and Go for cdk/go.mod.
+    required: false
+    default: 'false'
+  wait:
+    description: Wait for the deployment to stabilize (passes --wait).
+    required: false
+    default: 'true'
+  message:
+    description: Deploy message (-m). Empty uses the head commit subject and short SHA.
+    required: false
+    default: ''
+  working-directory:
+    description: Directory to run citadel in.
+    required: false
+    default: '.'
+  config:
+    description: Path to citadel.yml, relative to working-directory.
+    required: false
+    default: 'citadel.yml'
+  version:
+    description: citadel version (X.Y.Z). Empty uses the version matching this action's tag.
+    required: false
+    default: ''
+  upload-logs:
+    description: Upload .citadel/runs/<id> as a workflow artifact.
+    required: false
+    default: 'true'
+  install-only:
+    description: Test-only. Stop after installing citadel.
+    required: false
+    default: 'false'
+
+outputs:
+  environment:
+    description: The citadel environment deployed.
+    value: ${{ steps.env.outputs.environment }}
+  run-id:
+    description: The .citadel run id.
+    value: ${{ steps.run.outputs.run-id }}
+  image-uri:
+    description: The image URI deployed.
+    value: ${{ steps.run.outputs.image-uri }}
+
+runs:
+  using: composite
+  steps:
+    - id: env
+      if: inputs.install-only != 'true'
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/scripts/resolve-env.sh"
+      env:
+        CITADEL_ENVIRONMENT: ${{ inputs.environment }}
+        CITADEL_BRANCH_MAP: ${{ inputs.branch-map }}
+
+    - id: version
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/scripts/version.sh"
+      env:
+        CITADEL_VERSION_INPUT: ${{ inputs.version }}
+        CITADEL_ACTION_REF: ${{ github.action_ref }}
+
+    - if: steps.version.outputs.mode == 'source'
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: ${{ github.action_path }}/../go.mod
+        cache-dependency-path: ${{ github.action_path }}/../go.sum
+
+    - shell: bash
+      run: bash "$GITHUB_ACTION_PATH/scripts/install.sh"
+      env:
+        CITADEL_INSTALL_MODE: ${{ steps.version.outputs.mode }}
+        CITADEL_INSTALL_VERSION: ${{ steps.version.outputs.version }}
+        CITADEL_ACTION_REF: ${{ github.action_ref }}
+
+    - id: cdk
+      if: inputs.install-only != 'true' && inputs.deploy-infra == 'true'
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/scripts/cdk-go-mod.sh"
+      env:
+        CITADEL_WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        CITADEL_CONFIG: ${{ inputs.config }}
+
+    - if: inputs.install-only != 'true' && inputs.deploy-infra == 'true'
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+
+    - if: inputs.install-only != 'true' && inputs.deploy-infra == 'true'
+      shell: bash
+      run: npm install -g aws-cdk
+
+    - if: steps.cdk.outputs.go-mod != ''
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: ${{ steps.cdk.outputs.go-mod }}
+        cache-dependency-path: ${{ steps.cdk.outputs.go-sum }}
+        cache: ${{ steps.cdk.outputs.go-sum != '' }}
+
+    - id: deploy
+      if: inputs.install-only != 'true'
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/scripts/deploy.sh"
+      env:
+        CITADEL_ENV: ${{ steps.env.outputs.environment }}
+        CITADEL_WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        CITADEL_CONFIG: ${{ inputs.config }}
+        CITADEL_MESSAGE: ${{ inputs.message }}
+        CITADEL_ENV_FILE_CONTENT: ${{ inputs.env-file }}
+        CITADEL_SKIP_SECRETS: ${{ inputs.skip-secrets }}
+        CITADEL_DEPLOY_INFRA: ${{ inputs.deploy-infra }}
+        CITADEL_WAIT: ${{ inputs.wait }}
+
+    - id: run
+      if: always() && inputs.install-only != 'true'
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/scripts/locate-run.sh"
+      env:
+        CITADEL_WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        CITADEL_CONFIG: ${{ inputs.config }}
+        CITADEL_ENV: ${{ steps.env.outputs.environment }}
+
+    - if: always() && inputs.install-only != 'true' && inputs.upload-logs == 'true' && steps.run.outputs.run-dir != ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: citadel-run-${{ steps.env.outputs.environment }}-${{ steps.run.outputs.run-id }}
+        path: ${{ steps.run.outputs.run-dir }}
+        if-no-files-found: ignore
+        retention-days: 30
+
+    - if: always() && inputs.install-only != 'true'
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/scripts/summary.sh"
+      env:
+        CITADEL_RUN_DIR: ${{ steps.run.outputs.run-dir }}
+        CITADEL_IMAGE_URI: ${{ steps.run.outputs.image-uri }}
