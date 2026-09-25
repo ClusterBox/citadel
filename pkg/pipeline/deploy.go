@@ -45,17 +45,22 @@ func (o *DeployOptions) out() io.Writer {
 // stages are Deploy's side-effecting steps. deployWith takes them as a value
 // so tests can pin the step order without AWS, Docker or CDK.
 type stages struct {
-	syncSecrets func(ctx context.Context, w io.Writer, cfg *config.DeployConfig, opts *DeployOptions) error
+	// syncSecrets returns how many SSM parameters it updated.
+	syncSecrets func(ctx context.Context, w io.Writer, cfg *config.DeployConfig, opts *DeployOptions) (int, error)
 	build       func(ctx context.Context, w io.Writer, cfg *config.DeployConfig, opts *DeployOptions) (string, error)
 	cdk         func(ctx context.Context, w io.Writer, cfg *config.DeployConfig, opts *DeployOptions) error
-	rollout     func(ctx context.Context, out io.Writer, run *project.Run, cfg *config.DeployConfig, opts *DeployOptions, imageURI, target string, rolledByCDK bool) error
+	// serviceRunsImage reports whether the ECS service's current task
+	// definition already uses imageURI (i.e. CDK really rolled it).
+	serviceRunsImage func(ctx context.Context, cfg *config.DeployConfig, env, imageURI string) (bool, error)
+	rollout          func(ctx context.Context, out io.Writer, run *project.Run, cfg *config.DeployConfig, opts *DeployOptions, imageURI, target string, rolledByCDK bool) error
 }
 
 var defaultStages = stages{
-	syncSecrets: syncSecrets,
-	build:       buildAndPushImage,
-	cdk:         deployCDK,
-	rollout:     rollout,
+	syncSecrets:      syncSecrets,
+	build:            buildAndPushImage,
+	cdk:              deployCDK,
+	serviceRunsImage: serviceRunsImage,
+	rollout:          rollout,
 }
 
 // Deploy executes the full deployment pipeline:
@@ -102,9 +107,11 @@ func deployWith(ctx context.Context, opts *DeployOptions, s stages) (retErr erro
 	defer finishRun(run, &retErr, &state)
 
 	// 2. Sync secrets to SSM (unless --skip-ssm)
+	secretsUpdated := 0
 	if !opts.SkipSSM && opts.EnvFile != "" {
 		step := run.Step("ssm-sync")
-		err := s.syncSecrets(ctx, step.Out(), cfg, opts)
+		var err error
+		secretsUpdated, err = s.syncSecrets(ctx, step.Out(), cfg, opts)
 		step.End(err)
 		if err != nil {
 			return err
@@ -146,9 +153,11 @@ func deployWith(ctx context.Context, opts *DeployOptions, s stages) (retErr erro
 	}
 
 	// 5. Update the running service (runtime-specific) and record the deploy.
-	// For ECS, a CDK deploy with imageTag=<sha> has already rolled the service.
+	// For ECS, a CDK deploy with imageTag=<sha> normally rolls the service —
+	// but not when CloudFormation had nothing to change (see cdkRolledService).
 	if !opts.DryRun {
-		rolledByCDK := opts.DeployInfra && cfg.ResolvedRuntime() == config.RuntimeECS
+		rolledByCDK := opts.DeployInfra && cfg.ResolvedRuntime() == config.RuntimeECS &&
+			cdkRolledService(ctx, out, s, cfg, opts, imageTag, secretsUpdated)
 		if err := s.rollout(ctx, out, run, cfg, opts, imageTag, state.Target, rolledByCDK); err != nil {
 			return err
 		}
@@ -231,28 +240,60 @@ func openRun(opts *DeployOptions, cfg *config.DeployConfig, gitSHA string) *proj
 	return run
 }
 
-// syncSecrets syncs the declared secrets from the env file to SSM.
-func syncSecrets(ctx context.Context, w io.Writer, cfg *config.DeployConfig, opts *DeployOptions) error {
+// cdkRolledService decides, after an ECS `cdk deploy`, whether CDK really
+// rolled the service onto imageURI. CloudFormation no-ops when the template is
+// unchanged (re-running a commit, rolling back after a laptop deploy, a secret
+// rotation), so citadel must roll the service itself whenever secrets changed
+// or the service is not on imageURI, or that cannot be verified.
+func cdkRolledService(ctx context.Context, out io.Writer, s stages, cfg *config.DeployConfig, opts *DeployOptions, imageURI string, secretsUpdated int) bool {
+	if secretsUpdated > 0 {
+		fmt.Fprintf(out, "🔁 Secrets changed; rolling the service so tasks pick them up\n")
+		return false
+	}
+	runs, err := s.serviceRunsImage(ctx, cfg, opts.Environment, imageURI)
+	if err != nil {
+		fmt.Fprintf(out, "⚠️  could not verify the CDK rollout (%v); rolling the service with citadel\n", err)
+		return false
+	}
+	if !runs {
+		fmt.Fprintf(out, "🔁 CDK left the service on another image; rolling it to %s\n", imageURI)
+		return false
+	}
+	return true
+}
+
+// serviceRunsImage asks ECS whether the service's task definition uses imageURI.
+func serviceRunsImage(ctx context.Context, cfg *config.DeployConfig, env, imageURI string) (bool, error) {
+	awsClient, err := aws.NewClient(ctx, cfg.Region)
+	if err != nil {
+		return false, fmt.Errorf("failed to create AWS client: %w", err)
+	}
+	return awsClient.NewECSClient().ServiceRunsImage(ctx, cfg, env, imageURI)
+}
+
+// syncSecrets syncs the declared secrets from the env file to SSM and returns
+// how many parameters it updated.
+func syncSecrets(ctx context.Context, w io.Writer, cfg *config.DeployConfig, opts *DeployOptions) (int, error) {
 	fmt.Fprintf(w, "🔐 Syncing secrets to SSM Parameter Store...\n")
 
 	awsClient, err := aws.NewClient(ctx, cfg.Region)
 	if err != nil {
-		return fmt.Errorf("failed to create AWS client: %w", err)
+		return 0, fmt.Errorf("failed to create AWS client: %w", err)
 	}
 
 	result, err := awsClient.SyncSecrets(ctx, cfg, opts.Environment, opts.EnvFile, opts.DryRun)
 	if err != nil {
-		return fmt.Errorf("failed to sync secrets: %w", err)
+		return 0, fmt.Errorf("failed to sync secrets: %w", err)
 	}
 
 	fmt.Fprintf(w, "   Updated: %d parameters\n", result.Updated)
 	fmt.Fprintf(w, "   Skipped: %d parameters (unchanged)\n", result.Skipped)
 	if len(result.Missing) > 0 {
 		fmt.Fprintf(w, "   ⚠️  Missing: %v\n", result.Missing)
-		return fmt.Errorf("missing required secrets")
+		return result.Updated, fmt.Errorf("missing required secrets")
 	}
 	fmt.Fprintf(w, "\n")
-	return nil
+	return result.Updated, nil
 }
 
 // rollout updates the running service, syncs Lambda config and optionally

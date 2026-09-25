@@ -33,29 +33,43 @@ type stageLog struct {
 	calls       []string
 	rolledByCDK bool
 	buildErr    error
+
+	secretsUpdated int   // what syncSecrets reports as updated
+	runsImage      bool  // what serviceRunsImage reports
+	runsImageErr   error // what serviceRunsImage fails with
+	checkedImage   string
+	rolloutWait    bool // opts.Wait as rollout saw it
 }
 
 func (l *stageLog) stages() stages {
 	return stages{
-		syncSecrets: func(context.Context, io.Writer, *config.DeployConfig, *DeployOptions) error {
+		syncSecrets: func(context.Context, io.Writer, *config.DeployConfig, *DeployOptions) (int, error) {
 			l.calls = append(l.calls, "ssm-sync")
-			return nil
+			return l.secretsUpdated, nil
 		},
 		build: func(context.Context, io.Writer, *config.DeployConfig, *DeployOptions) (string, error) {
 			l.calls = append(l.calls, "build")
-			return "111111111111.dkr.ecr.us-east-1.amazonaws.com/demo-dev-repo:abc1234", l.buildErr
+			return testImageURI, l.buildErr
 		},
 		cdk: func(context.Context, io.Writer, *config.DeployConfig, *DeployOptions) error {
 			l.calls = append(l.calls, "cdk")
 			return nil
 		},
-		rollout: func(_ context.Context, _ io.Writer, _ *project.Run, _ *config.DeployConfig, _ *DeployOptions, _, _ string, rolledByCDK bool) error {
+		serviceRunsImage: func(_ context.Context, _ *config.DeployConfig, _, imageURI string) (bool, error) {
+			l.calls = append(l.calls, "check-image")
+			l.checkedImage = imageURI
+			return l.runsImage, l.runsImageErr
+		},
+		rollout: func(_ context.Context, _ io.Writer, _ *project.Run, _ *config.DeployConfig, opts *DeployOptions, _, _ string, rolledByCDK bool) error {
 			l.calls = append(l.calls, "rollout")
 			l.rolledByCDK = rolledByCDK
+			l.rolloutWait = opts.Wait
 			return nil
 		},
 	}
 }
+
+const testImageURI = "111111111111.dkr.ecr.us-east-1.amazonaws.com/demo-dev-repo:abc1234"
 
 type runRecord struct {
 	Status string `json:"status"`
@@ -101,15 +115,18 @@ func deployOpts(configPath string, infra bool) *DeployOptions {
 
 func TestDeployOrder_ECSWithInfra_BuildsBeforeCDKAndCDKRollsOut(t *testing.T) {
 	cfgPath := writeTestConfig(t, "ecs")
-	var l stageLog
+	l := stageLog{runsImage: true}
 	if err := deployWith(context.Background(), deployOpts(cfgPath, true), l.stages()); err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"ssm-sync", "build", "cdk", "rollout"}; !reflect.DeepEqual(l.calls, want) {
+	if want := []string{"ssm-sync", "build", "cdk", "check-image", "rollout"}; !reflect.DeepEqual(l.calls, want) {
 		t.Fatalf("calls = %v, want %v", l.calls, want)
 	}
+	if l.checkedImage != testImageURI {
+		t.Fatalf("checked image = %q, want the pushed %q", l.checkedImage, testImageURI)
+	}
 	if !l.rolledByCDK {
-		t.Fatal("ECS with --deploy-infra must tell rollout that CDK already rolled the service")
+		t.Fatal("ECS with --deploy-infra, no secret changes and the service on the new image must tell rollout that CDK already rolled it")
 	}
 	r := onlyRun(t, cfgPath)
 	if want := []string{"ssm-sync:success", "build:success", "cdk:success"}; !reflect.DeepEqual(stepSummary(r), want) {
@@ -193,5 +210,107 @@ func TestRollout_ECSRolledByCDK_SkipsDeployStepButRecords(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(home, ".citadel", "deployments.db")); err != nil {
 		t.Fatalf("deploy history not recorded: %v", err)
+	}
+}
+
+func TestDeployOrder_ECSWithInfra_CDKNoOpLeavesOldImage_CitadelRolls(t *testing.T) {
+	cfgPath := writeTestConfig(t, "ecs")
+	l := stageLog{runsImage: false}
+	var out bytes.Buffer
+	opts := deployOpts(cfgPath, true)
+	opts.Out = &out
+	if err := deployWith(context.Background(), opts, l.stages()); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"ssm-sync", "build", "cdk", "check-image", "rollout"}; !reflect.DeepEqual(l.calls, want) {
+		t.Fatalf("calls = %v, want %v", l.calls, want)
+	}
+	if l.rolledByCDK {
+		t.Fatal("CDK left the service on another image; citadel must roll it")
+	}
+	if want := "🔁 CDK left the service on another image; rolling it to " + testImageURI; !strings.Contains(out.String(), want) {
+		t.Fatalf("output missing %q:\n%s", want, out.String())
+	}
+}
+
+func TestDeployOrder_ECSWithInfra_SecretsChanged_CitadelRollsWithoutCheck(t *testing.T) {
+	cfgPath := writeTestConfig(t, "ecs")
+	l := stageLog{secretsUpdated: 2, runsImage: true}
+	var out bytes.Buffer
+	opts := deployOpts(cfgPath, true)
+	opts.Out = &out
+	if err := deployWith(context.Background(), opts, l.stages()); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"ssm-sync", "build", "cdk", "rollout"}; !reflect.DeepEqual(l.calls, want) {
+		t.Fatalf("calls = %v, want %v (serviceRunsImage must not be consulted)", l.calls, want)
+	}
+	if l.rolledByCDK {
+		t.Fatal("updated secrets need a fresh rollout; citadel must roll the service")
+	}
+	if want := "🔁 Secrets changed; rolling the service so tasks pick them up"; !strings.Contains(out.String(), want) {
+		t.Fatalf("output missing %q:\n%s", want, out.String())
+	}
+}
+
+func TestDeployOrder_ECSWithInfra_CheckFails_CitadelRolls(t *testing.T) {
+	cfgPath := writeTestConfig(t, "ecs")
+	l := stageLog{runsImage: true, runsImageErr: errors.New("AccessDenied")}
+	var out bytes.Buffer
+	opts := deployOpts(cfgPath, true)
+	opts.Out = &out
+	if err := deployWith(context.Background(), opts, l.stages()); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"ssm-sync", "build", "cdk", "check-image", "rollout"}; !reflect.DeepEqual(l.calls, want) {
+		t.Fatalf("calls = %v, want %v", l.calls, want)
+	}
+	if l.rolledByCDK {
+		t.Fatal("an unverifiable CDK rollout must fall back to citadel rolling the service")
+	}
+	if want := "⚠️  could not verify the CDK rollout (AccessDenied); rolling the service with citadel"; !strings.Contains(out.String(), want) {
+		t.Fatalf("output missing %q:\n%s", want, out.String())
+	}
+}
+
+func TestDeployOrder_LambdaWithInfra_NeverChecksServiceImage(t *testing.T) {
+	cfgPath := writeTestConfig(t, "lambda")
+	l := stageLog{runsImage: true}
+	if err := deployWith(context.Background(), deployOpts(cfgPath, true), l.stages()); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range l.calls {
+		if c == "check-image" {
+			t.Fatalf("calls = %v: serviceRunsImage must not be consulted for Lambda", l.calls)
+		}
+	}
+}
+
+func TestDeployOrder_ECSWithoutInfra_NeverChecksServiceImage(t *testing.T) {
+	cfgPath := writeTestConfig(t, "ecs")
+	l := stageLog{runsImage: true}
+	if err := deployWith(context.Background(), deployOpts(cfgPath, false), l.stages()); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range l.calls {
+		if c == "check-image" {
+			t.Fatalf("calls = %v: serviceRunsImage must not be consulted without --deploy-infra", l.calls)
+		}
+	}
+}
+
+func TestDeployOrder_ECSRolledByCDK_ForwardsWait(t *testing.T) {
+	cfgPath := writeTestConfig(t, "ecs")
+	l := stageLog{runsImage: true}
+	opts := deployOpts(cfgPath, true)
+	opts.Wait = true
+	if err := deployWith(context.Background(), opts, l.stages()); err != nil {
+		t.Fatal(err)
+	}
+	if !l.rolledByCDK {
+		t.Fatal("want the CDK-rolled path")
+	}
+	if !l.rolloutWait {
+		t.Fatal("--wait must still reach rollout when CDK rolled the service, so the wait step runs")
 	}
 }
