@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/ClusterBox/citadel/internal/project"
 	"github.com/ClusterBox/citadel/pkg/config"
 	"github.com/aws/aws-sdk-go-v2/service/ecr"
 	"github.com/docker/docker/api/types"
@@ -23,8 +24,8 @@ type BuildResult struct {
 	ImageURI string
 }
 
-// Build builds a Docker image
-func (c *Client) Build(ctx context.Context, cfg *config.DeployConfig, contextPath, tag string) (*BuildResult, error) {
+// Build builds a Docker image, streaming the daemon's build output to w.
+func (c *Client) Build(ctx context.Context, w io.Writer, cfg *config.DeployConfig, contextPath, tag string) (*BuildResult, error) {
 	// Create build context tar
 	buildContext, err := createTarFromDirectory(contextPath)
 	if err != nil {
@@ -47,7 +48,7 @@ func (c *Client) Build(ctx context.Context, cfg *config.DeployConfig, contextPat
 	defer resp.Body.Close()
 
 	// Stream build output
-	_, err = io.Copy(os.Stdout, resp.Body)
+	_, err = io.Copy(w, resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read build output: %w", err)
 	}
@@ -118,6 +119,13 @@ func createTarFromDirectory(dir string) (io.ReadCloser, error) {
 				return filepath.SkipDir
 			}
 
+			// Always skip .citadel/: it holds per-deploy run logs and local
+			// state (internal/project.DirName), never something an image
+			// should ship or that should bust the build cache.
+			if fi.IsDir() && fi.Name() == project.DirName {
+				return filepath.SkipDir
+			}
+
 			// Check .dockerignore patterns
 			relPath, err := filepath.Rel(dir, file)
 			if err != nil {
@@ -168,8 +176,8 @@ func createTarFromDirectory(dir string) (io.ReadCloser, error) {
 	return r, nil
 }
 
-// Push pushes an image to ECR
-func (c *Client) Push(ctx context.Context, ecrClient *ecr.Client, imageTag string) error {
+// Push pushes an image to ECR, streaming the daemon's push output to w.
+func (c *Client) Push(ctx context.Context, w io.Writer, ecrClient *ecr.Client, imageTag string) error {
 	// Get ECR authorization token
 	authToken, err := c.getECRAuthToken(ctx, ecrClient)
 	if err != nil {
@@ -189,7 +197,7 @@ func (c *Client) Push(ctx context.Context, ecrClient *ecr.Client, imageTag strin
 	defer resp.Close()
 
 	// Stream push output
-	_, err = io.Copy(os.Stdout, resp)
+	_, err = io.Copy(w, resp)
 	if err != nil {
 		return fmt.Errorf("failed to read push output: %w", err)
 	}

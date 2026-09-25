@@ -3,6 +3,7 @@ package aws
 import (
 	"context"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/ClusterBox/citadel/pkg/config"
@@ -50,7 +51,7 @@ func resolveService(cfg *config.DeployConfig, env string) string {
 }
 
 // UpdateService triggers a new deployment for an ECS service
-func (ec *ECSClient) UpdateService(ctx context.Context, cfg *config.DeployConfig, env string) error {
+func (ec *ECSClient) UpdateService(ctx context.Context, w io.Writer, cfg *config.DeployConfig, env string) error {
 	input := &ecs.UpdateServiceInput{
 		Cluster:            aws.String(resolveCluster(cfg, env)),
 		Service:            aws.String(resolveService(cfg, env)),
@@ -66,9 +67,9 @@ func (ec *ECSClient) UpdateService(ctx context.Context, cfg *config.DeployConfig
 		return fmt.Errorf("service update returned nil service")
 	}
 
-	fmt.Printf("✅ Deployment triggered for service: %s\n", *output.Service.ServiceName)
-	fmt.Printf("   Desired tasks: %d\n", output.Service.DesiredCount)
-	fmt.Printf("   Running tasks: %d\n", output.Service.RunningCount)
+	fmt.Fprintf(w, "✅ Deployment triggered for service: %s\n", *output.Service.ServiceName)
+	fmt.Fprintf(w, "   Desired tasks: %d\n", output.Service.DesiredCount)
+	fmt.Fprintf(w, "   Running tasks: %d\n", output.Service.RunningCount)
 
 	return nil
 }
@@ -101,8 +102,8 @@ func (ec *ECSClient) GetServiceStatus(ctx context.Context, cfg *config.DeployCon
 }
 
 // WaitForStableService waits for a service to reach a stable state
-func (ec *ECSClient) WaitForStableService(ctx context.Context, cfg *config.DeployConfig, env string) error {
-	fmt.Printf("⏳ Waiting for service to stabilize...\n")
+func (ec *ECSClient) WaitForStableService(ctx context.Context, w io.Writer, cfg *config.DeployConfig, env string) error {
+	fmt.Fprintf(w, "⏳ Waiting for service to stabilize...\n")
 
 	waiter := ecs.NewServicesStableWaiter(ec.client)
 
@@ -117,7 +118,7 @@ func (ec *ECSClient) WaitForStableService(ctx context.Context, cfg *config.Deplo
 		return fmt.Errorf("failed waiting for service to stabilize: %w", err)
 	}
 
-	fmt.Printf("✅ Service is stable\n")
+	fmt.Fprintf(w, "✅ Service is stable\n")
 	return nil
 }
 

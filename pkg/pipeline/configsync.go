@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"fmt"
+	"io"
 	"maps"
 	"sort"
 	"strings"
@@ -86,9 +87,9 @@ func looksSecretish(key string) bool {
 // UpdateFunctionConfiguration replaces the entire env map. When dryRun is set
 // it prints the diff and writes nothing (and skips the settle-wait, since no
 // code update was requested).
-func syncLambdaConfig(ctx context.Context, lc *aws.LambdaClient, cfg *config.DeployConfig, env string, dryRun bool) error {
+func syncLambdaConfig(ctx context.Context, w io.Writer, lc *aws.LambdaClient, cfg *config.DeployConfig, env string, dryRun bool) error {
 	fnName := cfg.ResolveFunctionName(env)
-	fmt.Printf("🔧 Syncing function config for %s...\n", fnName)
+	fmt.Fprintf(w, "🔧 Syncing function config for %s...\n", fnName)
 
 	if !dryRun {
 		if err := lc.WaitForFunctionUpdated(ctx, fnName); err != nil {
@@ -103,20 +104,20 @@ func syncLambdaConfig(ctx context.Context, lc *aws.LambdaClient, cfg *config.Dep
 
 	merged, changed := MergedEnv(existing, cfg.Env, cfg.Secrets, aws.SecretPrefix(cfg, env))
 	if !changed {
-		fmt.Printf("   Environment unchanged (%d vars)\n", len(merged))
+		fmt.Fprintf(w, "   Environment unchanged (%d vars)\n", len(merged))
 		return nil
 	}
 
 	for _, line := range EnvDiff(existing, merged) {
-		fmt.Printf("   %s\n", line)
+		fmt.Fprintf(w, "   %s\n", line)
 	}
 	if dryRun {
-		fmt.Printf("   [dry-run] Would update function environment (%d vars)\n", len(merged))
+		fmt.Fprintf(w, "   [dry-run] Would update function environment (%d vars)\n", len(merged))
 		return nil
 	}
 	if err := lc.UpdateFunctionEnv(ctx, fnName, merged); err != nil {
 		return err
 	}
-	fmt.Printf("   Environment updated (%d vars)\n", len(merged))
+	fmt.Fprintf(w, "   Environment updated (%d vars)\n", len(merged))
 	return nil
 }

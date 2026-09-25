@@ -12,7 +12,6 @@ package registry
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/ClusterBox/citadel/pkg/config"
 	"gopkg.in/yaml.v3"
@@ -88,7 +87,7 @@ func resolveEntry(e Entry) (Service, error) {
 	if e.Env == "" {
 		return Service{}, fmt.Errorf("registry entry %s missing env", e.Repo)
 	}
-	cfgPath := filepath.Join(e.Repo, "citadel.yml")
+	cfgPath := config.ResolveDefaultPath(e.Repo)
 	data, err := os.ReadFile(cfgPath)
 	if err != nil {
 		return Service{}, fmt.Errorf("read %s: %w", cfgPath, err)
