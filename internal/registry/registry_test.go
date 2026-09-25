@@ -102,6 +102,37 @@ runtime: lambda
 	}
 }
 
+func TestResolve_RepoWithOnlyCitadelYamlIsFound(t *testing.T) {
+	// README documents citadel.yaml as an accepted fallback filename; the
+	// registry must resolve it the same way config.Load does, not hardcode
+	// citadel.yml and miss the repo entirely.
+	dir := t.TempDir()
+	repo := filepath.Join(dir, "legolas")
+	writeFile(t, filepath.Join(repo, "citadel.yaml"), `
+name: legolas
+region: us-east-1
+container:
+  port: 3000
+  cpu: 256
+  memory: 512
+environments:
+  dev:
+    account: "111111111111"
+secrets:
+  - DATABASE_URL
+`)
+	reg := filepath.Join(dir, "registry.yml")
+	writeFile(t, reg, "services:\n  - repo: "+repo+"\n    env: dev\n")
+
+	services, errs := Resolve(reg)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	if len(services) != 1 || services[0].ID != "legolas-dev" {
+		t.Fatalf("services = %+v", services)
+	}
+}
+
 func TestLoadFile_EmptyFileIsValid(t *testing.T) {
 	dir := t.TempDir()
 	reg := filepath.Join(dir, "registry.yml")
