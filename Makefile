@@ -66,8 +66,10 @@ update:
 # Note: "goreleaser/goreleaser:v2" is not a published tag on Docker Hub
 # (only full semver tags like v2.18.2 and "latest" exist); pinned to the
 # latest v2.x stable release for determinism.
+# Runs as the host UID/GID so dist/ isn't left root-owned; HOME=/tmp so
+# `git config --global` has somewhere to write for a UID with no passwd entry.
 release-snapshot:
-	docker run --rm -v "$(CURDIR):/src" -w /src --entrypoint sh goreleaser/goreleaser:v2.18.2 \
+	docker run --rm -v "$(CURDIR):/src" -w /src -u "$$(id -u):$$(id -g)" -e HOME=/tmp --entrypoint sh goreleaser/goreleaser:v2.18.2 \
 		-c 'git config --global --add safe.directory /src && goreleaser release --snapshot --clean'
 
 # Lint GitHub workflow files (needs Docker).
