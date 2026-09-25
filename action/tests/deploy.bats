@@ -8,6 +8,7 @@ setup() {
   cat > "$FAKE_DIR/bin/citadel" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$@" > "$FAKE_DIR/args"
+if [[ -n "${CITADEL_ENV_FILE_CONTENT+x}" ]]; then echo set > "$FAKE_DIR/content_var"; else echo unset > "$FAKE_DIR/content_var"; fi
 prev=""
 for a in "$@"; do
   if [[ "$prev" == "--env-file" ]]; then
@@ -23,6 +24,7 @@ EOF
   chmod +x "$FAKE_DIR/bin/citadel"
   export PATH="$FAKE_DIR/bin:$PATH"
   export CITADEL_ENV=dev CITADEL_MESSAGE="ship it" CITADEL_WORKING_DIRECTORY="$BATS_TEST_TMPDIR" CITADEL_CONFIG=citadel.yml
+  : > "$BATS_TEST_TMPDIR/citadel.yml"
 }
 
 @test "writes the env file privately, masks values first, passes args, then removes it" {
@@ -90,4 +92,31 @@ EOF
   [ "$status" -eq 0 ]
   sha=$(git -C "$repo" rev-parse --short HEAD)
   grep -qx -- "feat: add thing ($sha)" "$FAKE_DIR/args"
+}
+
+@test "citadel does not inherit the env-file content variable" {
+  export CITADEL_ENV_FILE_CONTENT="A=b"
+  run bash "$SCRIPTS/deploy.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$FAKE_DIR/content_var")" = "unset" ]
+}
+
+@test "an existing config file is passed with --config" {
+  export CITADEL_ENV_FILE_CONTENT="A=b"
+  run bash "$SCRIPTS/deploy.sh"
+  [ "$status" -eq 0 ]
+  grep -qx -- '--config' "$FAKE_DIR/args"
+  grep -qx -- 'citadel.yml' "$FAKE_DIR/args"
+}
+
+@test "a missing config file omits --config so citadel's citadel.yaml fallback applies" {
+  rm "$BATS_TEST_TMPDIR/citadel.yml"
+  : > "$BATS_TEST_TMPDIR/citadel.yaml"
+  export CITADEL_ENV_FILE_CONTENT="A=b"
+  run bash "$SCRIPTS/deploy.sh"
+  [ "$status" -eq 0 ]
+  run grep -qx -- '--config' "$FAKE_DIR/args"
+  [ "$status" -ne 0 ]
+  expected=$'deploy\n--env\ndev\n-m\nship it\n--env-file\n'"$(cat "$FAKE_DIR/env_path")"$'\n--wait'
+  [ "$(cat "$FAKE_DIR/args")" = "$expected" ]
 }

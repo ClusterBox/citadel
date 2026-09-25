@@ -14,7 +14,13 @@ if [[ -z "$message" ]]; then
   message="$(git log -1 --format=%s 2>/dev/null || echo deploy) ($(git rev-parse --short HEAD 2>/dev/null || echo unknown))"
 fi
 
-args=(deploy --config "$config" --env "$env_name" -m "$message")
+args=(deploy)
+# Only pass --config when the file exists; otherwise let citadel apply its own
+# citadel.yml -> citadel.yaml fallback.
+if [[ -f "$config" ]]; then
+  args+=(--config "$config")
+fi
+args+=(--env "$env_name" -m "$message")
 
 if [[ "${CITADEL_SKIP_SECRETS:-false}" == "true" ]]; then
   args+=(--skip-ssm)
@@ -30,6 +36,9 @@ else
   env_file="$(mktemp "${RUNNER_TEMP:?}/citadel-XXXXXX")"
   trap 'rm -f "$env_file"' EXIT
   printf '%s\n' "$CITADEL_ENV_FILE_CONTENT" > "$env_file"
+  # Keep the whole .env out of the environment of citadel, cdk, the CDK app,
+  # aws and git; they read the private file instead.
+  unset CITADEL_ENV_FILE_CONTENT
   mask_env_file "$env_file"
   args+=(--env-file "$env_file")
 fi
