@@ -67,6 +67,12 @@ when `citadel.yml` is absent.
 `citadel deploy` creates `.citadel/` automatically if it is missing. Dry runs
 record nothing.
 
+`citadel` always excludes `.citadel/` from the Docker build context it sends
+to the daemon, the same way it excludes `.git/`. Tools that hash or copy the
+repo themselves instead of going through `citadel deploy` — e.g. a CDK
+`DockerImageFunction`/`fromImageAsset` pointing at the repo root — should add
+`.citadel/` to their own `.dockerignore`.
+
 ## citadel-logs daemon
 
 Citadel ships a separate always-on binary, `citadel-logs`, that watches

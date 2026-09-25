@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/ClusterBox/citadel/internal/project"
 	"github.com/ClusterBox/citadel/pkg/config"
 	"github.com/aws/aws-sdk-go-v2/service/ecr"
 	"github.com/docker/docker/api/types"
@@ -115,6 +116,13 @@ func createTarFromDirectory(dir string) (io.ReadCloser, error) {
 
 			// Always skip .git directory
 			if fi.IsDir() && fi.Name() == ".git" {
+				return filepath.SkipDir
+			}
+
+			// Always skip .citadel/: it holds per-deploy run logs and local
+			// state (internal/project.DirName), never something an image
+			// should ship or that should bust the build cache.
+			if fi.IsDir() && fi.Name() == project.DirName {
 				return filepath.SkipDir
 			}
 
