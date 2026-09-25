@@ -92,6 +92,7 @@ runs:
       env:
         CITADEL_INSTALL_MODE: ${{ steps.version.outputs.mode }}
         CITADEL_INSTALL_VERSION: ${{ steps.version.outputs.version }}
+        CITADEL_ACTION_REF: ${{ github.action_ref }}
 
     - id: cdk
       if: inputs.install-only != 'true' && inputs.deploy-infra == 'true'

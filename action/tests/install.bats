@@ -65,3 +65,48 @@ EOF
   [[ "$output" == *"::notice"*"unreleased citadel"* ]]
   [[ "$output" == *"citadel version source"* ]]
 }
+
+fake_go_recording_args() {
+  cat > "$BATS_TEST_TMPDIR/bin/go" <<'EOF2'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$BATS_TEST_TMPDIR/go_args"
+while [[ $# -gt 0 ]]; do [[ "$1" == -o ]] && { printf '#!/bin/sh\necho "citadel version source"\n' > "$2"; chmod +x "$2"; }; shift; done
+EOF2
+  chmod +x "$BATS_TEST_TMPDIR/bin/go"
+}
+
+@test "source mode outside a git checkout labels the build with the action ref" {
+  export CITADEL_INSTALL_MODE=source CITADEL_ACTION_REF=main GITHUB_ACTION_PATH="$BATS_TEST_TMPDIR/checkout/action"
+  mkdir -p "$GITHUB_ACTION_PATH"
+  fake_go_recording_args
+  run bash "$SCRIPTS/install.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"built from source (main)"* ]]
+  grep -q -- '-X main.version=source-main' "$BATS_TEST_TMPDIR/go_args"
+}
+
+@test "source mode without git or an action ref labels the build with the ref segment of the action path" {
+  export CITADEL_INSTALL_MODE=source CITADEL_ACTION_REF="" GITHUB_ACTION_PATH="$BATS_TEST_TMPDIR/_actions/ClusterBox/citadel/feat-x/action"
+  mkdir -p "$GITHUB_ACTION_PATH"
+  fake_go_recording_args
+  run bash "$SCRIPTS/install.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"built from source (feat-x)"* ]]
+  grep -q -- '-X main.version=source-feat-x' "$BATS_TEST_TMPDIR/go_args"
+}
+
+@test "a failed download explains that the release may not exist or still be publishing" {
+  printf '#!/bin/sh\nexit 22\n' > "$BATS_TEST_TMPDIR/bin/curl"
+  run bash "$SCRIPTS/install.sh"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"citadel: could not download $CITADEL_RELEASE_BASE_URL/v9.9.9/citadel_9.9.9_linux_amd64.tar.gz — does release v9.9.9 exist (tags without a GitHub Release, e.g. v0.1.0/v0.2.0, cannot be installed) or is it still publishing?"* ]]
+  [ ! -e "$RUNNER_TOOL_CACHE/citadel/9.9.9/linux_amd64/citadel" ]
+}
+
+@test "a failed checksums download gets the same explanation" {
+  rm "$REL/checksums.txt"
+  printf '#!/usr/bin/env bash\nout=""; url=""\nwhile [[ $# -gt 0 ]]; do case "$1" in -o) out="$2"; shift 2 ;; -*) shift ;; *) url="$1"; shift ;; esac; done\ncp "${url#file://}" "$out" 2>/dev/null || exit 22\n' > "$BATS_TEST_TMPDIR/bin/curl"
+  run bash "$SCRIPTS/install.sh"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"citadel: could not download $CITADEL_RELEASE_BASE_URL/v9.9.9/checksums.txt — does release v9.9.9 exist"* ]]
+}

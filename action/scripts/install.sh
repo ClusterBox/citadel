@@ -10,7 +10,16 @@ if [[ "$mode" == "source" ]]; then
   src="$(cd "${GITHUB_ACTION_PATH:?}/.." && pwd)"
   bin_dir="${RUNNER_TEMP:?}/citadel-bin"
   mkdir -p "$bin_dir"
-  rev="$(git -C "$src" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+  # A remote action is a tarball checkout with no .git: fall back to the
+  # action ref (github.action_ref), else the ref segment of
+  # _actions/<owner>/<repo>/<ref>/action, else "unknown".
+  if ! rev="$(git -C "$src" rev-parse --short HEAD 2>/dev/null)"; then
+    rev="${CITADEL_ACTION_REF:-}"
+    if [[ -z "$rev" ]]; then
+      rev="$(basename "$(dirname "$GITHUB_ACTION_PATH")")"
+    fi
+    rev="${rev:-unknown}"
+  fi
   echo "::notice title=citadel::Using an unreleased citadel built from source ($rev). Pin the action to a vX.Y.Z tag for reproducible deploys."
   (cd "$src" && CGO_ENABLED=0 go build -ldflags "-X main.version=source-$rev" -o "$bin_dir/citadel" ./cmd/citadel)
 else
@@ -21,8 +30,12 @@ else
     base="${CITADEL_RELEASE_BASE_URL:-https://github.com/ClusterBox/citadel/releases/download}/v$version"
     tmp="$(mktemp -d "${RUNNER_TEMP:?}/citadel-dl-XXXXXX")"
     trap 'rm -rf "$tmp"' EXIT
-    curl -fsSL --retry 3 -o "$tmp/$asset" "$base/$asset"
-    curl -fsSL --retry 3 -o "$tmp/checksums.txt" "$base/checksums.txt"
+    for file in "$asset" checksums.txt; do
+      if ! curl -fsSL --retry 3 -o "$tmp/$file" "$base/$file"; then
+        echo "citadel: could not download $base/$file — does release v$version exist (tags without a GitHub Release, e.g. v0.1.0/v0.2.0, cannot be installed) or is it still publishing?" >&2
+        exit 1
+      fi
+    done
     verify_checksum "$tmp" "$asset"
     mkdir -p "$tmp/x"
     tar -xzf "$tmp/$asset" -C "$tmp/x" citadel
