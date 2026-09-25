@@ -7,6 +7,10 @@ roll out, wait — in one step.
 ## Usage
 
 ```yaml
+on:
+  push:
+    branches: [main, development]
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -38,13 +42,13 @@ with `environment` or `branch-map`).
 | `branch-map` | `main=prod,development=dev` | Comma-separated branch=env pairs used when environment is empty. |
 | `env-file` | `''` | Contents of the .env file (pass a secret). Required unless skip-secrets is true. |
 | `skip-secrets` | `false` | Skip syncing secrets to SSM (passes --skip-ssm). |
-| `deploy-infra` | `false` | Also run cdk deploy (passes --deploy-infra); installs Node 20, the aws-cdk CLI and Go for cdk/go.mod. |
+| `deploy-infra` | `false` | Also run cdk deploy (passes --deploy-infra); installs Node 22, the aws-cdk CLI and Go for cdk/go.mod. |
 | `wait` | `true` | Wait for the deployment to stabilize (passes --wait). |
 | `message` | `''` (head commit subject and short SHA) | Deploy message (-m). Empty uses the head commit subject and short SHA. |
 | `working-directory` | `.` | Directory to run citadel in. |
 | `config` | `citadel.yml` | Path to citadel.yml, relative to working-directory. |
 | `version` | `''` (matches this action's tag) | citadel version (X.Y.Z). Empty uses the version matching this action's tag. |
-| `upload-logs` | `true` | Upload .citadel/runs/<id> as a workflow artifact. |
+| `upload-logs` | `true` | Upload `.citadel/runs/<id>` as a workflow artifact (raw, not masked; kept 30 days). |
 | `install-only` | `false` | Test-only. Stop after installing citadel. |
 
 ## Outputs
@@ -71,14 +75,56 @@ gh secret set CITADEL_ENV_FILE --env dev --repo <owner>/<repo> < dev.env
 
 **Masking:** before citadel runs, the action parses the `.env` contents the
 same way citadel's own env loader does (skipping blank lines and `#`
-comments, splitting on the first `=`, stripping one layer of matching
-quotes) and emits a `::add-mask::` workflow command for every non-empty
-value, so none of it can appear in logs. A trimmed, non-blank,
+comments, splitting on the first `=`, stripping surrounding quote
+characters) and emits a `::add-mask::` workflow command for every non-empty
+value, so the values are masked in the job log. It then also masks every
+whole trimmed `KEY=VALUE` line, so a base64 continuation such as `abc==`
+that merely looks like `KEY=VALUE` is still hidden. A trimmed, non-blank,
 non-comment line with no `=` — the continuation of a pasted multi-line
-secret such as a PEM key — is masked too. The `.env` contents are written to
-a private (`mktemp`, mode 0600) temp file under `RUNNER_TEMP` that is always
-removed via an `EXIT` trap, since composite actions have no post-step to run
-cleanup in.
+secret such as a PEM key — is masked too. Masks shorter than 3 characters
+are skipped (a lone `=` would star out every `=` in the log), so very short
+values are not masked.
+
+Every value in the env file is masked, public ones included: a value such as
+`us-east-1` will also show as `***` wherever it appears in the job log, and
+GitHub drops any job output that contains a masked value (for example
+`image-uri`, if the env file holds the region or account id).
+
+The `.env` contents are written to a private (`mktemp`, mode 0600) temp file
+under `RUNNER_TEMP` that is always removed via an `EXIT` trap, since
+composite actions have no post-step to run cleanup in. The deploy step then
+unsets the variable holding the contents, so citadel, `cdk`, the CDK app,
+`aws` and `git` never inherit the whole `.env` in their environment.
+
+**The uploaded run artifact is raw, not masked.** `::add-mask::` only
+applies to the job log; the `citadel-run-*` artifact (`upload-logs: true`)
+holds citadel's per-step logs exactly as written. citadel itself never
+prints secret values — the SSM sync reports only parameter names and counts —
+but anything a subprocess prints (`docker build`, `cdk deploy`, your CDK app)
+lands in the artifact verbatim. Artifacts are kept for 30 days; set
+`upload-logs: false` if your build or CDK app may print secrets.
+
+## Required AWS permissions
+
+The credentials the job runs with (e.g. from
+`aws-actions/configure-aws-credentials`) need:
+
+- **Identity:** `sts:GetCallerIdentity` (citadel resolves the account id).
+- **SSM secrets** (unless `skip-secrets: true`): `ssm:GetParameter` (with
+  decryption) and `ssm:PutParameter` on the service's parameters, plus
+  `kms:Decrypt` and `kms:Encrypt` on the KMS key protecting the
+  `SecureString` parameters.
+- **ECR push:** `ecr:GetAuthorizationToken`, `ecr:BatchCheckLayerAvailability`,
+  `ecr:InitiateLayerUpload`, `ecr:UploadLayerPart`,
+  `ecr:CompleteLayerUpload`, `ecr:PutImage`.
+- **ECS rollout:** `ecs:DescribeServices`, `ecs:DescribeTaskDefinition`,
+  `ecs:RegisterTaskDefinition`, `ecs:UpdateService`, `ecs:TagResource`
+  (tags carry over to the new task-definition revision), and `iam:PassRole`
+  on the task and execution roles.
+- **`deploy-infra: true`:** whatever `cdk deploy` needs — in practice
+  `sts:AssumeRole` on the CDK bootstrap roles (`cdk-*-deploy-role-*`,
+  `cdk-*-file-publishing-role-*`, `cdk-*-image-publishing-role-*`,
+  `cdk-*-lookup-role-*`) of the target account and region.
 
 ## Versions
 
@@ -90,13 +136,18 @@ build citadel from source at that ref instead, and the action prints an
 `::notice::` that an unreleased citadel is in use. Pin to a `vX.Y.Z` tag for
 reproducible deploys.
 
+`CITADEL_RELEASE_BASE_URL` overrides the release download location for the
+action's own tests only. It must not be set in real workflows: it would
+download citadel from somewhere other than this repository's GitHub
+Releases.
+
 ## What it does
 
 1. Resolve the citadel environment from the `environment` input or the
    current branch via `branch-map`.
 2. Decide whether to install a release or build from source, then install
    citadel (and set up Go first when building from source).
-3. When `deploy-infra: true`, install Node 20 and the `aws-cdk` CLI, and set
+3. When `deploy-infra: true`, install Node 22 and the `aws-cdk` CLI, and set
    up Go for `cdk/go.mod` if the CDK app has one.
 4. Run `citadel deploy` — sync secrets, build/push, optional CDK, roll out,
    wait — writing the env-file to a private temp file and masking every

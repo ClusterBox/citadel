@@ -76,6 +76,16 @@ repo themselves instead of going through `citadel deploy` — e.g. a CDK
 ### Deploy from GitHub Actions
 
 ```yaml
+on:
+  push:
+    branches: [main, development]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name == 'main' && 'prod' || 'dev' }}
+    permissions:
+      contents: read
     concurrency: { group: citadel-${{ github.ref_name }}, cancel-in-progress: false }
     steps:
       - uses: actions/checkout@v4
