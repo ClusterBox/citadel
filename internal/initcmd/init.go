@@ -115,6 +115,9 @@ func Run(ctx context.Context, opts Options, p Prompter, d Detector) error {
 	if statErr == nil && !opts.Force {
 		return adopt(opts)
 	}
+	if statErr == nil {
+		opts = seedFromExisting(opts)
+	}
 
 	v, err := collect(ctx, opts, p, d)
 	if err != nil {
@@ -182,6 +185,65 @@ func adopt(opts Options) error {
 	return nil
 }
 
+// seedFromExisting fills values not given explicitly on the command line
+// from an existing, parseable citadel.yml before --force overwrites it.
+// Without this, `init --force --yes` (no other flags) would silently fall
+// back to today's directory-derived defaults for name, port, envs, ... and
+// rename every AWS resource on the next deploy. Explicit flags still win.
+// If the existing config does not parse, opts is returned unchanged: it's
+// --force, so falling back to today's defaults is expected.
+func seedFromExisting(opts Options) Options {
+	cfg, err := config.Load(opts.ConfigPath)
+	if err != nil {
+		return opts
+	}
+	v := &opts.Values
+
+	if !opts.Provided[FlagName] {
+		v.Name = cfg.Name
+	}
+	if !opts.Provided[FlagECS] && !opts.Provided[FlagLambda] {
+		v.Runtime = cfg.ResolvedRuntime()
+	}
+	if !opts.Provided[FlagRegion] {
+		v.Region = cfg.Region
+	}
+	if !opts.Provided[FlagEnvs] && len(cfg.Environments) > 0 {
+		envs := make([]string, 0, len(cfg.Environments))
+		for e := range cfg.Environments {
+			envs = append(envs, e)
+		}
+		sort.Strings(envs)
+		v.Envs = envs
+	}
+	if !opts.Provided[FlagAccount] {
+		if e := firstEnv(cfg); e != "" {
+			v.Account = cfg.Environments[e].Account
+		}
+	}
+	if !opts.Provided[FlagSecrets] {
+		v.Secrets = append([]string(nil), cfg.Secrets...)
+	}
+	if cfg.ResolvedRuntime() == config.RuntimeECS {
+		if !opts.Provided[FlagPort] {
+			v.Port = cfg.Container.Port
+		}
+		if !opts.Provided[FlagCPU] {
+			v.CPU = cfg.Container.CPU
+		}
+		if !opts.Provided[FlagMemory] {
+			v.Memory = cfg.Container.Memory
+		}
+		if !opts.Provided[FlagHealthCheckPath] {
+			v.HealthCheckPath = cfg.Container.HealthCheckPath
+		}
+	}
+	if cfg.ResolvedRuntime() == config.RuntimeLambda && cfg.Lambda != nil && !opts.Provided[FlagFunctionName] {
+		v.FunctionName = cfg.Lambda.FunctionName
+	}
+	return opts
+}
+
 // collect resolves every value: explicit flags win, then detection, then
 // prompts (unless opts.Yes) seeded with those defaults.
 func collect(ctx context.Context, opts Options, p Prompter, d Detector) (Values, error) {
@@ -235,7 +297,10 @@ func collect(ctx context.Context, opts Options, p Prompter, d Detector) (Values,
 		return nil
 	}
 
-	if !opts.Provided[FlagName] {
+	// v.Name/.Region/.Account may already be seeded from an existing config
+	// (see seedFromExisting, used by --force); only fall back to directory
+	// name / detection when nothing filled them in yet.
+	if !opts.Provided[FlagName] && v.Name == "" {
 		abs, err := filepath.Abs(filepath.Dir(opts.ConfigPath))
 		if err != nil {
 			return v, err
@@ -246,7 +311,7 @@ func collect(ctx context.Context, opts Options, p Prompter, d Detector) (Values,
 		return v, err
 	}
 
-	if !opts.Provided[FlagRegion] {
+	if !opts.Provided[FlagRegion] && v.Region == "" {
 		v.Region = d.Region()
 		if v.Region == "" {
 			v.Region = FallbackRegion
@@ -256,7 +321,7 @@ func collect(ctx context.Context, opts Options, p Prompter, d Detector) (Values,
 		return v, err
 	}
 
-	if !opts.Provided[FlagAccount] {
+	if !opts.Provided[FlagAccount] && v.Account == "" {
 		acct, err := d.Account(ctx, v.Region)
 		switch {
 		case err == nil:

@@ -319,6 +319,38 @@ func TestRun_CitadelDirIsARegularFileFailsAndWritesNothing(t *testing.T) {
 	}
 }
 
+func TestRun_ForceSeedsIdentityFromExistingConfig(t *testing.T) {
+	// The project directory is deliberately NOT named "smaug" so that a
+	// directory-derived default name would differ from the existing config's
+	// identity: --force --yes with no other flags must keep smaug's own
+	// name, runtime and envs/account, not silently rename every resource.
+	opts, _ := newOpts(t, "not-smaug")
+	if err := os.WriteFile(opts.ConfigPath, []byte(smaugYML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts.Force = true
+
+	if err := Run(context.Background(), opts, &fakePrompter{}, okDetector); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(opts.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Name != "smaug" {
+		t.Fatalf("name = %q, want smaug (from the existing config, not the directory name)", cfg.Name)
+	}
+	if cfg.ResolvedRuntime() != config.RuntimeLambda {
+		t.Fatalf("runtime = %q, want lambda (from the existing config)", cfg.ResolvedRuntime())
+	}
+	if len(cfg.Environments) != 1 {
+		t.Fatalf("envs = %v, want to keep only the existing config's dev env", cfg.Environments)
+	}
+	if cfg.Environments["dev"].Account != "454066810976" {
+		t.Fatalf("account = %q, want the existing config's account", cfg.Environments["dev"].Account)
+	}
+}
+
 func TestRun_DryRunWritesNothing(t *testing.T) {
 	opts, out := newOpts(t, "svc")
 	opts.Values.Secrets = []string{"DATABASE_URL"}
