@@ -291,6 +291,7 @@ Single source of truth: citadel.yml defines everything about your deployment.`,
 	dashboardCmd.Flags().String("addr", "localhost:5500", "Address to serve the dashboard on")
 
 	// Add commands
+	rootCmd.AddCommand(newInitCmd(&configPath, &dryRun))
 	rootCmd.AddCommand(deployCmd)
 	rootCmd.AddCommand(syncSecretsCmd)
 	rootCmd.AddCommand(buildCmd)

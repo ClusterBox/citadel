@@ -44,6 +44,29 @@ make install
 citadel deploy --env dev --deploy-infra
 ```
 
+### Start a project
+
+```bash
+citadel init --ecs       # or --lambda; prompts for anything not passed as a flag
+citadel init --lambda --yes --account 123456789012   # non-interactive
+```
+
+`init` writes a commented `citadel.yml` and a `.citadel/` directory next to it.
+If `citadel.yml` already exists it is left alone and only `.citadel/` is
+created (pass `--force` to regenerate the config). `citadel.yaml` is accepted
+when `citadel.yml` is absent.
+
+### The `.citadel/` directory
+
+| Path | Committed | Contents |
+|---|---|---|
+| `.citadel/project.yml` | yes | project id, name, runtime, citadel version that created it |
+| `.citadel/state/<env>.json` | no | last deploy of each env from this checkout (shown by `citadel status`) |
+| `.citadel/runs/<id>/` | no | one folder per deploy: `run.json` + a log file per step (newest 50 kept) |
+
+`citadel deploy` creates `.citadel/` automatically if it is missing. Dry runs
+record nothing.
+
 ## citadel-logs daemon
 
 Citadel ships a separate always-on binary, `citadel-logs`, that watches
