@@ -66,6 +66,28 @@ func (lc *LambdaClient) WaitForFunctionUpdated(ctx context.Context, functionName
 	return nil
 }
 
+// functionCodeAPI is the subset of the Lambda API FunctionImage uses.
+type functionCodeAPI interface {
+	GetFunction(ctx context.Context, params *lambda.GetFunctionInput, optFns ...func(*lambda.Options)) (*lambda.GetFunctionOutput, error)
+}
+
+// FunctionImage returns the container image the function runs now — the
+// rollback snapshot for Lambda services.
+func (lc *LambdaClient) FunctionImage(ctx context.Context, functionName string) (string, error) {
+	return functionImage(ctx, lc.client, functionName)
+}
+
+func functionImage(ctx context.Context, api functionCodeAPI, functionName string) (string, error) {
+	out, err := api.GetFunction(ctx, &lambda.GetFunctionInput{FunctionName: aws.String(functionName)})
+	if err != nil {
+		return "", fmt.Errorf("get function %s: %w", functionName, err)
+	}
+	if out.Code == nil || aws.ToString(out.Code.ImageUri) == "" {
+		return "", fmt.Errorf("function %s is not a container-image function", functionName)
+	}
+	return aws.ToString(out.Code.ImageUri), nil
+}
+
 // functionConfigAPI is the slice of the Lambda API the env methods need,
 // narrow so tests can fake it without the real client.
 type functionConfigAPI interface {
