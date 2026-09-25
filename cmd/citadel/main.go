@@ -77,6 +77,7 @@ Single source of truth: citadel.yml defines everything about your deployment.`,
 				StreamLogs:  streamLogs,
 				TailLines:   tailLines,
 				Message:     message,
+				Version:     version,
 			}
 
 			return pipeline.Deploy(ctx, opts)
@@ -187,6 +188,10 @@ Single source of truth: citadel.yml defines everything about your deployment.`,
 			}
 
 			fmt.Printf("📊 Deployment Status — %s (%s)\n\n", cfg.Name, environment)
+
+			if last := pipeline.LastLocalDeploy(configPath, environment); last != "" {
+				fmt.Printf("%s\n\n", last)
+			}
 
 			awsClient, err := aws.NewClient(ctx, cfg.Region)
 			if err != nil {

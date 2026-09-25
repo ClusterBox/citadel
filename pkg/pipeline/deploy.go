@@ -8,10 +8,12 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"time"
 
 	"github.com/ClusterBox/citadel/internal/aws"
 	"github.com/ClusterBox/citadel/internal/deploydb"
 	"github.com/ClusterBox/citadel/internal/docker"
+	"github.com/ClusterBox/citadel/internal/project"
 	"github.com/ClusterBox/citadel/pkg/config"
 )
 
@@ -40,8 +42,10 @@ func (o *DeployOptions) out() io.Writer {
 	return os.Stdout
 }
 
-// Deploy executes the full deployment pipeline
-func Deploy(ctx context.Context, opts *DeployOptions) error {
+// Deploy executes the full deployment pipeline. Every stage runs as a named
+// step of a project.Run (see openRun): non-dry-run deploys leave per-step logs
+// under .citadel/runs/ next to citadel.yml and update .citadel/state/<env>.json.
+func Deploy(ctx context.Context, opts *DeployOptions) (retErr error) {
 	out := opts.out()
 
 	// 1. Load config
@@ -65,86 +69,64 @@ func Deploy(ctx context.Context, opts *DeployOptions) error {
 	fmt.Fprintf(out, "   Account: %s\n", envCfg.Account)
 	fmt.Fprintf(out, "\n")
 
+	gitSHA, _ := getGitSHA()
+	run := openRun(opts, cfg, gitSHA)
+	state := project.State{
+		Target:     resolveTarget(cfg, opts.Environment),
+		DeployedBy: currentUser(),
+	}
+	// Finish is idempotent: this records the outcome on every early return.
+	defer func() { run.Finish(retErr, state) }()
+
 	// 2. Sync secrets to SSM (unless --skip-ssm)
 	if !opts.SkipSSM && opts.EnvFile != "" {
-		fmt.Fprintf(out, "🔐 Syncing secrets to SSM Parameter Store...\n")
-
-		awsClient, err := aws.NewClient(ctx, cfg.Region)
+		step := run.Step("ssm-sync")
+		err := syncSecrets(ctx, step.Out(), cfg, opts)
+		step.End(err)
 		if err != nil {
-			return fmt.Errorf("failed to create AWS client: %w", err)
+			return err
 		}
-
-		result, err := awsClient.SyncSecrets(ctx, cfg, opts.Environment, opts.EnvFile, opts.DryRun)
-		if err != nil {
-			return fmt.Errorf("failed to sync secrets: %w", err)
+	} else {
+		if opts.SkipSSM {
+			fmt.Fprintf(out, "⏭️  Skipping SSM secret sync (--skip-ssm)\n\n")
 		}
-
-		fmt.Fprintf(out, "   Updated: %d parameters\n", result.Updated)
-		fmt.Fprintf(out, "   Skipped: %d parameters (unchanged)\n", result.Skipped)
-		if len(result.Missing) > 0 {
-			fmt.Fprintf(out, "   ⚠️  Missing: %v\n", result.Missing)
-			return fmt.Errorf("missing required secrets")
-		}
-		fmt.Fprintf(out, "\n")
-	} else if opts.SkipSSM {
-		fmt.Fprintf(out, "⏭️  Skipping SSM secret sync (--skip-ssm)\n\n")
+		run.Skip("ssm-sync")
 	}
 
 	// 3. Deploy CDK infrastructure (if requested)
 	if opts.DeployInfra {
-		fmt.Fprintf(out, "🏗️  Deploying CDK infrastructure...\n")
-
-		if err := deployCDK(ctx, out, cfg, opts); err != nil {
+		step := run.Step("cdk")
+		fmt.Fprintf(step.Out(), "🏗️  Deploying CDK infrastructure...\n")
+		err := deployCDK(ctx, step.Out(), cfg, opts)
+		if err == nil {
+			fmt.Fprintf(step.Out(), "✅ Infrastructure deployed\n\n")
+		}
+		step.End(err)
+		if err != nil {
 			return fmt.Errorf("failed to deploy CDK infrastructure: %w", err)
 		}
-
-		fmt.Fprintf(out, "✅ Infrastructure deployed\n\n")
+	} else {
+		run.Skip("cdk")
 	}
 
 	// 4. Build and push Docker image
-	fmt.Fprintf(out, "🐳 Building Docker image...\n")
-
-	imageTag, err := buildAndPushImage(ctx, out, cfg, opts)
+	step := run.Step("build")
+	fmt.Fprintf(step.Out(), "🐳 Building Docker image...\n")
+	imageTag, err := buildAndPushImage(ctx, step.Out(), cfg, opts)
+	if err == nil {
+		fmt.Fprintf(step.Out(), "✅ Image pushed: %s\n\n", imageTag)
+	}
+	step.End(err)
 	if err != nil {
 		return fmt.Errorf("failed to build/push image: %w", err)
 	}
-
-	fmt.Fprintf(out, "✅ Image pushed: %s\n\n", imageTag)
+	state.ImageURI = imageTag
 
 	// 5. Update the running service (runtime-specific) and record the deploy.
 	if !opts.DryRun {
-		runtime := cfg.ResolvedRuntime()
-		fmt.Fprintf(out, "🚀 Deploying to %s...\n", runtime)
-
-		awsClient, err := aws.NewClient(ctx, cfg.Region)
-		if err != nil {
-			return fmt.Errorf("failed to create AWS client: %w", err)
+		if err := rollout(ctx, out, run, cfg, opts, imageTag, state.Target); err != nil {
+			return err
 		}
-
-		target := resolveTarget(cfg, opts.Environment)
-		finish := deployRecorder(ctx, out, cfg, opts, imageTag, target)
-
-		deployer := selectDeployer(cfg, awsClient)
-		if err := deployer.Update(ctx, out, cfg, opts.Environment, imageTag); err != nil {
-			finish(err)
-			return fmt.Errorf("failed to update %s: %w", runtime, err)
-		}
-		if runtime == config.RuntimeLambda {
-			if opts.SkipConfig {
-				fmt.Fprintf(out, "⏭️  Skipping function config sync (--skip-config)\n")
-			} else if err := syncLambdaConfig(ctx, out, awsClient.NewLambdaClient(), cfg, opts.Environment, false); err != nil {
-				finish(err)
-				return fmt.Errorf("failed to sync function config: %w", err)
-			}
-		}
-		if opts.Wait {
-			if err := deployer.WaitStable(ctx, out, cfg, opts.Environment); err != nil {
-				finish(err)
-				return fmt.Errorf("deployment did not stabilize: %w", err)
-			}
-		}
-		finish(nil)
-		fmt.Fprintf(out, "\n")
 	}
 
 	if opts.DryRun && cfg.ResolvedRuntime() == config.RuntimeLambda && !opts.SkipConfig {
@@ -159,6 +141,8 @@ func Deploy(ctx context.Context, opts *DeployOptions) error {
 	}
 
 	fmt.Fprintf(out, "✨ Deployment complete!\n")
+	// Record success now: log streaming below blocks until Ctrl-C.
+	run.Finish(nil, state)
 
 	// 6. Stream logs if requested
 	if opts.StreamLogs && !opts.DryRun {
@@ -184,6 +168,121 @@ func Deploy(ctx context.Context, opts *DeployOptions) error {
 	}
 
 	return nil
+}
+
+// openRun returns the Run that records this deploy under .citadel/ next to
+// the config file. Dry runs, and any failure to use .citadel/ (read-only
+// checkout, permissions), get a terminal-only Run: run logging is best-effort
+// and never blocks a deploy.
+func openRun(opts *DeployOptions, cfg *config.DeployConfig, gitSHA string) *project.Run {
+	out := opts.out()
+	if opts.DryRun {
+		return project.TerminalRun(out)
+	}
+	dir, err := project.Open(filepath.Dir(opts.ConfigPath))
+	if err == nil {
+		_, _, err = dir.EnsureProject(project.NewMeta(cfg.Name, string(cfg.ResolvedRuntime()), opts.Version, time.Now()))
+	}
+	var run *project.Run
+	if err == nil {
+		run, err = dir.NewRun(project.RunInfo{Env: opts.Environment, Message: opts.Message, GitSHA: gitSHA}, out)
+	}
+	if err != nil {
+		fmt.Fprintf(out, "⚠️  run logging disabled: %v\n\n", err)
+		return project.TerminalRun(out)
+	}
+	return run
+}
+
+// syncSecrets syncs the declared secrets from the env file to SSM.
+func syncSecrets(ctx context.Context, w io.Writer, cfg *config.DeployConfig, opts *DeployOptions) error {
+	fmt.Fprintf(w, "🔐 Syncing secrets to SSM Parameter Store...\n")
+
+	awsClient, err := aws.NewClient(ctx, cfg.Region)
+	if err != nil {
+		return fmt.Errorf("failed to create AWS client: %w", err)
+	}
+
+	result, err := awsClient.SyncSecrets(ctx, cfg, opts.Environment, opts.EnvFile, opts.DryRun)
+	if err != nil {
+		return fmt.Errorf("failed to sync secrets: %w", err)
+	}
+
+	fmt.Fprintf(w, "   Updated: %d parameters\n", result.Updated)
+	fmt.Fprintf(w, "   Skipped: %d parameters (unchanged)\n", result.Skipped)
+	if len(result.Missing) > 0 {
+		fmt.Fprintf(w, "   ⚠️  Missing: %v\n", result.Missing)
+		return fmt.Errorf("missing required secrets")
+	}
+	fmt.Fprintf(w, "\n")
+	return nil
+}
+
+// rollout updates the running service, syncs Lambda config and optionally
+// waits for stability, recording the deploy in ~/.citadel/deployments.db.
+// Steps: deploy, config-sync (lambda only), wait.
+func rollout(ctx context.Context, out io.Writer, run *project.Run, cfg *config.DeployConfig, opts *DeployOptions, imageURI, target string) error {
+	runtime := cfg.ResolvedRuntime()
+	step := run.Step("deploy")
+	w := step.Out()
+	fmt.Fprintf(w, "🚀 Deploying to %s...\n", runtime)
+
+	awsClient, err := aws.NewClient(ctx, cfg.Region)
+	if err != nil {
+		err = fmt.Errorf("failed to create AWS client: %w", err)
+		step.End(err)
+		return err
+	}
+
+	finish := deployRecorder(ctx, w, cfg, opts, imageURI, target)
+
+	deployer := selectDeployer(cfg, awsClient)
+	if err := deployer.Update(ctx, w, cfg, opts.Environment, imageURI); err != nil {
+		finish(err)
+		err = fmt.Errorf("failed to update %s: %w", runtime, err)
+		step.End(err)
+		return err
+	}
+	step.End(nil)
+
+	if runtime == config.RuntimeLambda {
+		if opts.SkipConfig {
+			fmt.Fprintf(out, "⏭️  Skipping function config sync (--skip-config)\n")
+			run.Skip("config-sync")
+		} else {
+			step := run.Step("config-sync")
+			err := syncLambdaConfig(ctx, step.Out(), awsClient.NewLambdaClient(), cfg, opts.Environment, false)
+			step.End(err)
+			if err != nil {
+				finish(err)
+				return fmt.Errorf("failed to sync function config: %w", err)
+			}
+		}
+	}
+
+	if opts.Wait {
+		step := run.Step("wait")
+		err := deployer.WaitStable(ctx, step.Out(), cfg, opts.Environment)
+		step.End(err)
+		if err != nil {
+			finish(err)
+			return fmt.Errorf("deployment did not stabilize: %w", err)
+		}
+	} else {
+		run.Skip("wait")
+	}
+
+	finish(nil)
+	fmt.Fprintf(out, "\n")
+	return nil
+}
+
+// currentUser returns the local username recorded as the deployer.
+func currentUser() string {
+	if u, err := user.Current(); err == nil {
+		return u.Username
+	}
+	return "unknown"
 }
 
 // deployCDK deploys the CDK infrastructure
@@ -351,10 +450,7 @@ func deployRecorder(ctx context.Context, w io.Writer, cfg *config.DeployConfig, 
 		return noop
 	}
 
-	who := "unknown"
-	if u, uerr := user.Current(); uerr == nil {
-		who = u.Username
-	}
+	who := currentUser()
 	gitSHA, _ := getGitSHA()
 
 	id, err := db.Insert(ctx, deploydb.Deployment{
