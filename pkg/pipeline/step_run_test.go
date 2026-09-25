@@ -60,6 +60,23 @@ func TestRunStep_WorkingDirectoryExpandsVars(t *testing.T) {
 	}
 }
 
+// TestRunStep_CitadelEnvWinsOverStepEnv covers controller ruling (spec §3
+// order): a step's env: block must not be able to override citadel's own
+// CITADEL_* variables.
+func TestRunStep_CitadelEnvWinsOverStepEnv(t *testing.T) {
+	sc := runCtx(t)
+	s := newRunStep(config.PipelineStep{Name: "t", Run: `echo "$CITADEL_ENV|$FOO"`,
+		Env: map[string]string{"CITADEL_ENV": "hacked", "FOO": "bar"}})
+	var out bytes.Buffer
+	if err := s.Run(context.Background(), sc, &out); err != nil {
+		t.Fatal(err)
+	}
+	got := strings.TrimSpace(out.String())
+	if !strings.HasSuffix(got, "dev|bar") {
+		t.Fatalf("out = %q, want CITADEL_ENV to win over the step's env:", got)
+	}
+}
+
 func TestRunStep_NonZeroExit(t *testing.T) {
 	err := newRunStep(config.PipelineStep{Name: "t", Run: "exit 3"}).Run(context.Background(), runCtx(t), &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "exit status 3") {

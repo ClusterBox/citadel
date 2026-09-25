@@ -53,16 +53,19 @@ func (s *runStep) Run(ctx context.Context, sc *StepContext, w io.Writer) error {
 		return err
 	}
 
+	// CITADEL_* vars must win on conflict (spec §3 order), so the step's
+	// env: is appended first and citadelEnv last: exec.Cmd uses the last
+	// value for a duplicate key.
 	env := os.Environ()
-	for k, v := range citadelEnv(sc.Vars) {
-		env = append(env, k+"="+v)
-	}
 	for k, v := range s.env {
 		expanded, err := config.ExpandVars(v, sc.Vars)
 		if err != nil {
 			return err
 		}
 		env = append(env, k+"="+expanded)
+	}
+	for k, v := range citadelEnv(sc.Vars) {
+		env = append(env, k+"="+v)
 	}
 
 	args := append(append([]string{}, s.shell[1:]...), cmdText)
