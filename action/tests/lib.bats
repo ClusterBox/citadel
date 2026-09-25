@@ -7,25 +7,30 @@ setup() {
 
 @test "resolve_env maps main to prod and development to dev" {
   run resolve_env "" main "main=prod,development=dev"
-  [ "$status" -eq 0 ] && [ "$output" = "prod" ]
+  [ "$status" -eq 0 ]
+  [ "$output" = "prod" ]
   run resolve_env "" development "main=prod,development=dev"
-  [ "$status" -eq 0 ] && [ "$output" = "dev" ]
+  [ "$status" -eq 0 ]
+  [ "$output" = "dev" ]
 }
 
 @test "resolve_env tolerates spaces in the map" {
   run resolve_env "" main " main = prod , development=dev "
-  [ "$status" -eq 0 ] && [ "$output" = "prod" ]
+  [ "$status" -eq 0 ]
+  [ "$output" = "prod" ]
 }
 
 @test "resolve_env: explicit environment wins over the branch" {
   run resolve_env staging main "main=prod"
-  [ "$status" -eq 0 ] && [ "$output" = "staging" ]
+  [ "$status" -eq 0 ]
+  [ "$output" = "staging" ]
 }
 
 @test "resolve_env fails on an unmapped branch, naming branch and map" {
   run resolve_env "" feature/x "main=prod,development=dev"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"feature/x"* ]] && [[ "$output" == *"main=prod,development=dev"* ]]
+  [[ "$output" == *"feature/x"* ]]
+  [[ "$output" == *"main=prod,development=dev"* ]]
 }
 
 @test "resolve_env fails when the mapped value is empty" {
@@ -42,9 +47,11 @@ setup() {
 
 @test "asset_name rejects Windows and 32-bit runners" {
   run asset_name 0.1.0 Windows X64
-  [ "$status" -ne 0 ] && [[ "$output" == *"Windows"* ]]
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Windows"* ]]
   run asset_name 0.1.0 Linux X86
-  [ "$status" -ne 0 ] && [[ "$output" == *"X86"* ]]
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"X86"* ]]
 }
 
 @test "resolve_version: explicit input wins, with or without a leading v" {
@@ -56,7 +63,8 @@ setup() {
 
 @test "resolve_version rejects a non-semver explicit input" {
   run resolve_version main "" ""
-  [ "$status" -ne 0 ] && [[ "$output" == *"main"* ]]
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"main"* ]]
 }
 
 @test "resolve_version uses a vX.Y.Z action_ref" {
@@ -87,10 +95,12 @@ setup() {
 
   printf 'tampered' > "$dir/citadel_0.1.0_linux_amd64.tar.gz"
   run verify_checksum "$dir" citadel_0.1.0_linux_amd64.tar.gz
-  [ "$status" -ne 0 ] && [[ "$output" == *"mismatch"* ]]
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"mismatch"* ]]
 
   run verify_checksum "$dir" citadel_0.1.0_darwin_arm64.tar.gz
-  [ "$status" -ne 0 ] && [[ "$output" == *"not listed"* ]]
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"not listed"* ]]
 }
 
 @test "env_file_values parses like citadel's env loader" {
@@ -118,6 +128,13 @@ EOF
   printf 'A=one\nB=\nC="two"\n' > "$f"
   run mask_env_file "$f"
   [ "$output" = $'::add-mask::one\n::add-mask::two' ]
+}
+
+@test "mask_env_file escapes a literal percent-encoded sequence like @actions/core" {
+  f="$BATS_TEST_TMPDIR/.env"
+  printf 'P=p%%25w\n' > "$f"
+  run mask_env_file "$f"
+  [ "$output" = '::add-mask::p%2525w' ]
 }
 
 @test "env_file_values treats a non-comment line without '=' as a value (pasted secret continuation)" {

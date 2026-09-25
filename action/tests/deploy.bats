@@ -31,7 +31,8 @@ EOF
   [ "$status" -eq 0 ]
   mask_line=$(printf '%s\n' "$output" | grep -n '::add-mask::secret-one' | cut -d: -f1)
   call_line=$(printf '%s\n' "$output" | grep -n 'fake-citadel-called' | cut -d: -f1)
-  [ -n "$mask_line" ] && [ "$mask_line" -lt "$call_line" ]
+  [ -n "$mask_line" ]
+  [ "$mask_line" -lt "$call_line" ]
   [[ "$output" == *"::add-mask::secret two"* ]]
   [ "$(cat "$FAKE_DIR/env_mode")" = "600" ]
   [ ! -e "$(cat "$FAKE_DIR/env_path")" ]
@@ -75,6 +76,7 @@ EOF
 @test "deploy-infra and wait flags map to citadel flags" {
   export CITADEL_ENV_FILE_CONTENT="A=b" CITADEL_DEPLOY_INFRA=true CITADEL_WAIT=false
   run bash "$SCRIPTS/deploy.sh"
+  [ "$status" -eq 0 ]
   grep -qx -- '--deploy-infra' "$FAKE_DIR/args"
   run grep -qx -- '--wait' "$FAKE_DIR/args"
   [ "$status" -ne 0 ]

@@ -46,7 +46,8 @@ EOF
 @test "a checksum mismatch fails and installs nothing" {
   echo "0000000000000000000000000000000000000000000000000000000000000000  citadel_9.9.9_linux_amd64.tar.gz" > "$REL/checksums.txt"
   run bash "$SCRIPTS/install.sh"
-  [ "$status" -ne 0 ] && [[ "$output" == *"mismatch"* ]]
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"mismatch"* ]]
   [ ! -e "$RUNNER_TOOL_CACHE/citadel/9.9.9/linux_amd64/citadel" ]
 }
 

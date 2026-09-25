@@ -23,13 +23,16 @@ setup() {
   export CITADEL_VERSION_INPUT="" CITADEL_ACTION_REF=v1.2.3 GITHUB_ACTION_PATH=""
   run bash "$SCRIPTS/version.sh"
   [ "$status" -eq 0 ]
-  grep -qx 'mode=release' "$GITHUB_OUTPUT" && grep -qx 'version=1.2.3' "$GITHUB_OUTPUT"
+  grep -qx 'mode=release' "$GITHUB_OUTPUT"
+  grep -qx 'version=1.2.3' "$GITHUB_OUTPUT"
 }
 
 @test "version reports source mode with an empty version" {
   export CITADEL_VERSION_INPUT="" CITADEL_ACTION_REF=main GITHUB_ACTION_PATH=/x/main/action
   run bash "$SCRIPTS/version.sh"
-  grep -qx 'mode=source' "$GITHUB_OUTPUT" && grep -qx 'version=' "$GITHUB_OUTPUT"
+  [ "$status" -eq 0 ]
+  grep -qx 'mode=source' "$GITHUB_OUTPUT"
+  grep -qx 'version=' "$GITHUB_OUTPUT"
 }
 
 @test "cdk-go-mod reports cdk/go.mod next to the config, and nothing when absent" {
@@ -57,13 +60,15 @@ setup() {
   export CITADEL_WORKING_DIRECTORY="$BATS_TEST_TMPDIR" CITADEL_CONFIG=citadel.yml CITADEL_ENV=dev
   run bash "$SCRIPTS/locate-run.sh"
   [ "$status" -eq 0 ]
-  grep -qx "run-dir=" "$GITHUB_OUTPUT" && grep -qx "run-id=" "$GITHUB_OUTPUT"
+  grep -qx "run-dir=" "$GITHUB_OUTPUT"
+  grep -qx "run-id=" "$GITHUB_OUTPUT"
 }
 
 @test "summary appends the rendered run, and is a no-op without a run" {
   export CITADEL_RUN_DIR=""
   run bash "$SCRIPTS/summary.sh"
-  [ "$status" -eq 0 ] && [ ! -s "$GITHUB_STEP_SUMMARY" ]
+  [ "$status" -eq 0 ]
+  [ ! -s "$GITHUB_STEP_SUMMARY" ]
   d="$BATS_TEST_TMPDIR/run"; mkdir -p "$d"
   echo '{"id":"r1","env":"dev","git_sha":"s","status":"success","steps":[]}' > "$d/run.json"
   export CITADEL_RUN_DIR="$d" CITADEL_IMAGE_URI=""

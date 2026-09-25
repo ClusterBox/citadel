@@ -144,10 +144,18 @@ env_file_values() {
 }
 
 # mask_env_file FILE — emits a workflow command masking every value in FILE.
+# Each value is escaped like @actions/core's escapeData before being placed
+# in the ::add-mask:: command, in order: '%' -> '%25', then CR -> '%0D', then
+# LF -> '%0A'. Without this a value containing a literal "%25" would be
+# masked as its decoded form, and a masked value spanning "lines" (CR/LF)
+# would break the single-line workflow command.
 mask_env_file() {
-  local v
+  local v escaped
   while IFS= read -r v; do
-    printf '::add-mask::%s\n' "$v"
+    escaped="${v//%/%25}"
+    escaped="${escaped//$'\r'/%0D}"
+    escaped="${escaped//$'\n'/%0A}"
+    printf '::add-mask::%s\n' "$escaped"
   done < <(env_file_values "$1")
 }
 
