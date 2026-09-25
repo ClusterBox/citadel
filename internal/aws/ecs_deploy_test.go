@@ -162,3 +162,33 @@ func TestImageRepository(t *testing.T) {
 		}
 	}
 }
+
+func TestServiceRunsImage_ExactMatch(t *testing.T) {
+	api := &fakeECSDeployAPI{services: serviceWithTaskDef(), taskDef: legolasTaskDef("public.ecr.aws/sidecar:latest", testRepo+":abc1234")}
+	ok, err := serviceRunsImage(context.Background(), api, "c", "s", testRepo+":abc1234")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("service runs the image; want true")
+	}
+}
+
+func TestServiceRunsImage_OlderTagIsFalse(t *testing.T) {
+	api := &fakeECSDeployAPI{services: serviceWithTaskDef(), taskDef: legolasTaskDef(testRepo + ":oldsha")}
+	ok, err := serviceRunsImage(context.Background(), api, "c", "s", testRepo+":abc1234")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		t.Fatal("service is on an older tag; want false")
+	}
+}
+
+func TestServiceRunsImage_ServiceMissingIsError(t *testing.T) {
+	api := &fakeECSDeployAPI{taskDef: legolasTaskDef(testRepo + ":abc1234")}
+	_, err := serviceRunsImage(context.Background(), api, "legolas-dev-cluster", "legolas-dev-service", testRepo+":abc1234")
+	if err == nil || !strings.Contains(err.Error(), "legolas-dev-service") {
+		t.Fatalf("err = %v, want a service-not-found error", err)
+	}
+}

@@ -30,26 +30,9 @@ func (ec *ECSClient) DeployImage(ctx context.Context, w io.Writer, cfg *config.D
 }
 
 func deployImage(ctx context.Context, api ecsDeployAPI, w io.Writer, cluster, service, imageURI string) error {
-	desc, err := api.DescribeServices(ctx, &ecs.DescribeServicesInput{
-		Cluster:  aws.String(cluster),
-		Services: []string{service},
-	})
+	current, err := currentTaskDefinition(ctx, api, cluster, service)
 	if err != nil {
-		return fmt.Errorf("failed to describe service: %w", err)
-	}
-	if len(desc.Services) == 0 || desc.Services[0].TaskDefinition == nil {
-		return fmt.Errorf("ECS service %q not found in cluster %q", service, cluster)
-	}
-
-	current, err := api.DescribeTaskDefinition(ctx, &ecs.DescribeTaskDefinitionInput{
-		TaskDefinition: desc.Services[0].TaskDefinition,
-		Include:        []ecstypes.TaskDefinitionField{ecstypes.TaskDefinitionFieldTags},
-	})
-	if err != nil {
-		return fmt.Errorf("failed to describe task definition: %w", err)
-	}
-	if current.TaskDefinition == nil {
-		return fmt.Errorf("task definition %q not found", aws.ToString(desc.Services[0].TaskDefinition))
+		return err
 	}
 
 	in, err := revisionWithImage(current.TaskDefinition, current.Tags, imageURI)
@@ -81,6 +64,54 @@ func deployImage(ctx context.Context, api ecsDeployAPI, w io.Writer, cluster, se
 	fmt.Fprintf(w, "   Desired tasks: %d\n", out.Service.DesiredCount)
 	fmt.Fprintf(w, "   Running tasks: %d\n", out.Service.RunningCount)
 	return nil
+}
+
+// ServiceRunsImage reports whether the service's current task definition has
+// a container whose image is exactly imageURI. After a `cdk deploy` that may
+// have been a CloudFormation no-op, this tells whether the service is really
+// on the freshly pushed image.
+func (ec *ECSClient) ServiceRunsImage(ctx context.Context, cfg *config.DeployConfig, env, imageURI string) (bool, error) {
+	return serviceRunsImage(ctx, ec.client, resolveCluster(cfg, env), resolveService(cfg, env), imageURI)
+}
+
+func serviceRunsImage(ctx context.Context, api ecsDeployAPI, cluster, service, imageURI string) (bool, error) {
+	current, err := currentTaskDefinition(ctx, api, cluster, service)
+	if err != nil {
+		return false, err
+	}
+	for _, c := range current.TaskDefinition.ContainerDefinitions {
+		if aws.ToString(c.Image) == imageURI {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// currentTaskDefinition describes the task definition (with tags) the
+// service currently points at.
+func currentTaskDefinition(ctx context.Context, api ecsDeployAPI, cluster, service string) (*ecs.DescribeTaskDefinitionOutput, error) {
+	desc, err := api.DescribeServices(ctx, &ecs.DescribeServicesInput{
+		Cluster:  aws.String(cluster),
+		Services: []string{service},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to describe service: %w", err)
+	}
+	if len(desc.Services) == 0 || desc.Services[0].TaskDefinition == nil {
+		return nil, fmt.Errorf("ECS service %q not found in cluster %q", service, cluster)
+	}
+
+	current, err := api.DescribeTaskDefinition(ctx, &ecs.DescribeTaskDefinitionInput{
+		TaskDefinition: desc.Services[0].TaskDefinition,
+		Include:        []ecstypes.TaskDefinitionField{ecstypes.TaskDefinitionFieldTags},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to describe task definition: %w", err)
+	}
+	if current.TaskDefinition == nil {
+		return nil, fmt.Errorf("task definition %q not found", aws.ToString(desc.Services[0].TaskDefinition))
+	}
+	return current, nil
 }
 
 // revisionWithImage copies every registrable field of td into a
