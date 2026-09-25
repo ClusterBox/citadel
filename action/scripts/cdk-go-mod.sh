@@ -8,6 +8,8 @@ cdk_dir="${CITADEL_WORKING_DIRECTORY:-.}/$(dirname "${CITADEL_CONFIG:-citadel.ym
 if [[ -f "$cdk_dir/go.mod" ]]; then
   {
     echo "go-mod=$cdk_dir/go.mod"
-    echo "go-sum=$cdk_dir/go.sum"
+    if [[ -f "$cdk_dir/go.sum" ]]; then
+      echo "go-sum=$cdk_dir/go.sum"
+    fi
   } >> "$GITHUB_OUTPUT"
 fi

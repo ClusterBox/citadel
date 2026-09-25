@@ -73,6 +73,26 @@ repo themselves instead of going through `citadel deploy` — e.g. a CDK
 `DockerImageFunction`/`fromImageAsset` pointing at the repo root — should add
 `.citadel/` to their own `.dockerignore`.
 
+### Deploy from GitHub Actions
+
+```yaml
+    concurrency: { group: citadel-${{ github.ref_name }}, cancel-in-progress: false }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+      - uses: ClusterBox/citadel/action@v0.3.0
+        with:
+          deploy-infra: true
+          env-file: ${{ secrets.CITADEL_ENV_FILE }}
+```
+
+`main` deploys `prod` and `development` deploys `dev` (override with
+`environment` or `branch-map`). See [action/README.md](action/README.md).
+
 ## citadel-logs daemon
 
 Citadel ships a separate always-on binary, `citadel-logs`, that watches
@@ -125,11 +145,11 @@ On non-Linux platforms, use the Docker path instead:
 ## Roadmap
 
 - [x] Project architecture
-- [ ] CLI scaffolding
-- [ ] Config parser
-- [ ] SSM secret sync
-- [ ] Docker build/push
-- [ ] ECS deployment
+- [x] CLI scaffolding
+- [x] Config parser
+- [x] SSM secret sync
+- [x] Docker build/push
+- [x] ECS deployment
 - [ ] CDK construct library
 
 ## Configuration
@@ -153,6 +173,13 @@ queues:
 
 A queue ARN may appear in both lists if the service both reads and writes it.
 Citadel does not create the queues — they must already exist.
+
+## Releasing
+
+Push a tag `vX.Y.Z` on `main`. `.github/workflows/release.yml` runs the tests and
+publishes `citadel_<version>_<os>_<arch>.tar.gz` archives plus `checksums.txt`.
+The GitHub Action at the same tag (`ClusterBox/citadel/action@vX.Y.Z`) installs
+exactly that release. `make release-snapshot` builds the archives locally.
 
 ## License
 

@@ -45,6 +45,16 @@ setup() {
   grep -qx "go-mod=$w/svc/./cdk/go.mod" "$GITHUB_OUTPUT" || grep -qx "go-mod=$w/svc/cdk/go.mod" "$GITHUB_OUTPUT"
 }
 
+@test "cdk-go-mod reports go-mod without go-sum when go.sum is absent" {
+  w="$BATS_TEST_TMPDIR/w2"; mkdir -p "$w/svc/cdk"
+  touch "$w/svc/cdk/go.mod"
+  export CITADEL_WORKING_DIRECTORY="$w" CITADEL_CONFIG=svc/citadel.yml
+  run bash "$SCRIPTS/cdk-go-mod.sh"
+  [ "$status" -eq 0 ]
+  grep -q '^go-mod=' "$GITHUB_OUTPUT"
+  ! grep -q '^go-sum=' "$GITHUB_OUTPUT"
+}
+
 @test "locate-run finds the newest run and the image from state" {
   w="$BATS_TEST_TMPDIR/w"; mkdir -p "$w/.citadel/runs/20260925T100000Z-aaaa" "$w/.citadel/runs/20260925T110000Z-bbbb" "$w/.citadel/state"
   echo '{"image_uri":"repo:abc"}' > "$w/.citadel/state/dev.json"
