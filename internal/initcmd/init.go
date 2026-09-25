@@ -132,6 +132,13 @@ func Run(ctx context.Context, opts Options, p Prompter, d Detector) error {
 		return nil
 	}
 
+	// Check .citadel/ is usable before writing anything: a citadel.yml
+	// written first would leave the filesystem touched if ensureProjectDir
+	// below then fails (e.g. .citadel exists as a regular file).
+	if _, err := project.Existing(configDir); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+
 	if err := project.WriteFileAtomic(opts.ConfigPath, content); err != nil {
 		return err
 	}

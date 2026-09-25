@@ -302,6 +302,23 @@ func TestRun_ForceOverwritesConfigKeepsProjectID(t *testing.T) {
 	}
 }
 
+func TestRun_CitadelDirIsARegularFileFailsAndWritesNothing(t *testing.T) {
+	opts, _ := newOpts(t, "svc")
+	opts.Values.Secrets = []string{"DATABASE_URL"}
+	configDir := filepath.Dir(opts.ConfigPath)
+	if err := os.WriteFile(filepath.Join(configDir, project.DirName), []byte("oops"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := Run(context.Background(), opts, &fakePrompter{}, okDetector)
+	if err == nil {
+		t.Fatal("expected an error when .citadel exists as a regular file")
+	}
+	if _, statErr := os.Stat(opts.ConfigPath); !os.IsNotExist(statErr) {
+		t.Fatal("citadel.yml was written even though .citadel/ could not be created")
+	}
+}
+
 func TestRun_DryRunWritesNothing(t *testing.T) {
 	opts, out := newOpts(t, "svc")
 	opts.Values.Secrets = []string{"DATABASE_URL"}
