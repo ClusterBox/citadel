@@ -120,7 +120,12 @@ func Load(path string) (*DeployConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
+	return Parse(data)
+}
 
+// Parse decodes and validates citadel.yml content. Load and `citadel init`
+// (which checks rendered templates before writing them) share it.
+func Parse(data []byte) (*DeployConfig, error) {
 	var cfg DeployConfig
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse config: %w", err)

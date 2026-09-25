@@ -37,6 +37,14 @@ Single source of truth: citadel.yml defines everything about your deployment.`,
 	rootCmd.PersistentFlags().StringVarP(&environment, "env", "e", "", "Target environment (dev/prod)")
 	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "Show what would be done without executing")
 
+	// Accept citadel.yaml when citadel.yml is absent, unless --config was
+	// passed explicitly (an explicit path is always used as given).
+	rootCmd.PersistentPreRun = func(cmd *cobra.Command, args []string) {
+		if !cmd.Flags().Changed("config") {
+			configPath = config.ResolveDefaultPath(".")
+		}
+	}
+
 	// deploy command
 	deployCmd := &cobra.Command{
 		Use:   "deploy",
