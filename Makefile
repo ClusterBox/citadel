@@ -1,4 +1,4 @@
-.PHONY: build build-logs install install-logs uninstall update test clean fmt vet docker-logs check dev release-snapshot actionlint
+.PHONY: build build-logs install install-logs uninstall update test clean fmt vet docker-logs check dev release-snapshot actionlint action-test
 
 # Resolve where `go install` places binaries (GOBIN, else GOPATH/bin)
 GOBIN := $(shell go env GOBIN)
@@ -75,3 +75,11 @@ release-snapshot:
 # Lint GitHub workflow files (needs Docker).
 actionlint:
 	docker run --rm -v "$(CURDIR):/repo" -w /repo rhysd/actionlint:latest -color
+
+ACTION_SCRIPTS := $(addprefix scripts/,$(notdir $(wildcard action/scripts/*.sh)))
+
+# Lint and unit-test the GitHub Action's bash scripts (needs Docker).
+action-test:
+	docker run --rm -v "$(CURDIR)/action:/code" -w /code koalaman/shellcheck:stable -x --source-path=scripts $(ACTION_SCRIPTS)
+	docker run --rm -v "$(CURDIR)/action:/code" --entrypoint sh bats/bats:latest \
+		-c 'apk add --no-cache jq git >/dev/null && bats /code/tests'
