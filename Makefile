@@ -1,4 +1,4 @@
-.PHONY: build build-logs install install-logs uninstall update test clean fmt vet docker-logs check dev
+.PHONY: build build-logs install install-logs uninstall update test clean fmt vet docker-logs check dev release-snapshot actionlint
 
 # Resolve where `go install` places binaries (GOBIN, else GOPATH/bin)
 GOBIN := $(shell go env GOBIN)
@@ -61,3 +61,15 @@ update:
 	git pull --ff-only
 	go install ./cmd/citadel ./cmd/citadel-logs
 	@echo "Updated citadel in $(GOBIN)"
+
+# Build release archives locally without publishing (needs Docker).
+# Note: "goreleaser/goreleaser:v2" is not a published tag on Docker Hub
+# (only full semver tags like v2.18.2 and "latest" exist); pinned to the
+# latest v2.x stable release for determinism.
+release-snapshot:
+	docker run --rm -v "$(CURDIR):/src" -w /src --entrypoint sh goreleaser/goreleaser:v2.18.2 \
+		-c 'git config --global --add safe.directory /src && goreleaser release --snapshot --clean'
+
+# Lint GitHub workflow files (needs Docker).
+actionlint:
+	docker run --rm -v "$(CURDIR):/repo" -w /repo rhysd/actionlint:latest -color

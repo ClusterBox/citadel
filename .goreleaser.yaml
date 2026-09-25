@@ -1,0 +1,35 @@
+# Release config for the citadel CLI. A pushed tag vX.Y.Z runs
+# .github/workflows/release.yml, which publishes these archives and
+# checksums.txt to a GitHub Release. The GitHub Action (action/) downloads
+# them by exactly these names — keep name_template in sync with install.sh.
+version: 2
+project_name: citadel
+
+builds:
+  - id: citadel
+    main: ./cmd/citadel
+    binary: citadel
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  - id: citadel
+    ids: [citadel]
+    formats: [tar.gz]
+    name_template: "citadel_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+changelog:
+  use: github-native
+
+release:
+  github:
+    owner: ClusterBox
+    name: citadel
