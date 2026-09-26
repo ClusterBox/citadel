@@ -25,10 +25,16 @@ if [[ "$config" != "$default_config" || -f "$config" ]]; then
 fi
 args+=(--env "$env_name" -m "$message")
 
+# Keep the whole .env out of the environment of citadel, cdk, the CDK app,
+# aws and git, also when skip-secrets ignores it; they read the private
+# file instead. env_content is a plain (unexported) shell variable.
+env_content="${CITADEL_ENV_FILE_CONTENT:-}"
+unset CITADEL_ENV_FILE_CONTENT
+
 if [[ "${CITADEL_SKIP_SECRETS:-false}" == "true" ]]; then
   args+=(--skip-ssm)
 else
-  if [[ -z "${CITADEL_ENV_FILE_CONTENT:-}" ]]; then
+  if [[ -z "$env_content" ]]; then
     # shellcheck disable=SC2016
     echo 'citadel: the env-file input is empty; pass env-file: ${{ secrets.CITADEL_ENV_FILE }} or set skip-secrets: true' >&2
     exit 1
@@ -38,10 +44,7 @@ else
   # and citadel does not care about the extension.
   env_file="$(mktemp "${RUNNER_TEMP:?}/citadel-XXXXXX")"
   trap 'rm -f "$env_file"' EXIT
-  printf '%s\n' "$CITADEL_ENV_FILE_CONTENT" > "$env_file"
-  # Keep the whole .env out of the environment of citadel, cdk, the CDK app,
-  # aws and git; they read the private file instead.
-  unset CITADEL_ENV_FILE_CONTENT
+  printf '%s\n' "$env_content" > "$env_file"
   mask_env_file "$env_file"
   args+=(--env-file "$env_file")
 fi

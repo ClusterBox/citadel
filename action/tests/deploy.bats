@@ -101,6 +101,13 @@ EOF
   [ "$(cat "$FAKE_DIR/content_var")" = "unset" ]
 }
 
+@test "citadel does not inherit the env-file content variable with skip-secrets" {
+  export CITADEL_SKIP_SECRETS=true CITADEL_ENV_FILE_CONTENT="A=b"
+  run bash "$SCRIPTS/deploy.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$FAKE_DIR/content_var")" = "unset" ]
+}
+
 @test "an existing config file is passed with --config" {
   export CITADEL_ENV_FILE_CONTENT="A=b"
   run bash "$SCRIPTS/deploy.sh"
