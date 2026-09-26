@@ -3,6 +3,8 @@ package config
 import (
 	"fmt"
 	"regexp"
+	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -266,6 +268,20 @@ func (s PipelineStep) misplacedField(kind StepKind) string {
 	return ""
 }
 
+// subsetOf reports whether envs is a non-empty subset of of (an empty envs
+// means "every environment").
+func subsetOf(envs, of []string) bool {
+	if len(envs) == 0 {
+		return false
+	}
+	for _, e := range envs {
+		if !slices.Contains(of, e) {
+			return false
+		}
+	}
+	return true
+}
+
 // validatePipeline enforces the rules from the actions-engine spec. An absent
 // pipeline: (the default) is always valid.
 func (c *DeployConfig) validatePipeline() error {
@@ -392,6 +408,24 @@ func (c *DeployConfig) validatePipeline() error {
 		}
 		if err := requireBefore(rule[0], rule[1]); err != nil {
 			return err
+		}
+	}
+	if bi, ok := pos[StepBuild]; ok && len(c.Pipeline[bi].Envs) > 0 {
+		// cdk, deploy and task: need the image citadel/build pushes, so
+		// they may only run where build runs (R8).
+		buildEnvs := c.Pipeline[bi].Envs
+		needImage := append([]int{}, taskIdx...)
+		for _, b := range []string{StepCDK, StepDeploy} {
+			if i, ok := pos[b]; ok {
+				needImage = append(needImage, i)
+			}
+		}
+		sort.Ints(needImage)
+		for _, i := range needImage {
+			if !subsetOf(c.Pipeline[i].Envs, buildEnvs) {
+				return fmt.Errorf("pipeline[%d] %q: runs in environments where citadel/build does not (build envs: %s)",
+					i, c.Pipeline[i].StepName(), strings.Join(buildEnvs, ", "))
+			}
 		}
 	}
 	for _, i := range taskIdx {

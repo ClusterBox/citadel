@@ -71,6 +71,9 @@ func (cdkStep) Plan(_ context.Context, sc *StepContext, _ io.Writer) (bool, erro
 	return !sc.Opts.DeployInfra, nil
 }
 func (cdkStep) Run(ctx context.Context, sc *StepContext, w io.Writer) error {
+	if sc.ImageURI == "" {
+		return fmt.Errorf("no image for cdk: citadel/build did not run for %s", sc.Env)
+	}
 	fmt.Fprintf(w, "🏗️  Deploying CDK infrastructure...\n")
 	if err := sc.ops.cdk(ctx, w, sc.Cfg, sc.Opts); err != nil {
 		return err

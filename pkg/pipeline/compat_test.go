@@ -260,7 +260,10 @@ func TestDeploy_NoImageFails(t *testing.T) {
 	l := fakeOps{}
 	opts := DeployOptions{ConfigPath: cfgPath, Environment: "prod", Out: io.Discard}
 	err := deployWith(context.Background(), &opts, l.ops())
-	if err == nil || !strings.Contains(err.Error(), "citadel/build did not run for prod") {
+	// R8: a deploy that could run where citadel/build does not is rejected
+	// when citadel.yml loads (deployStep's runtime guard is covered by
+	// TestDeployStep_NoImageFails).
+	if err == nil || !strings.Contains(err.Error(), `pipeline[1] "deploy": runs in environments where citadel/build does not (build envs: dev)`) {
 		t.Fatalf("err = %v", err)
 	}
 	for _, c := range l.calls {

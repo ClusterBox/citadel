@@ -129,6 +129,9 @@ func TestPipeline_ValidationErrors(t *testing.T) {
 		{"task on lambda", lambdaBase, "pipeline:\n  - uses: citadel/build\n  - name: m\n    task: migrate\n", `task: is only supported for the ecs runtime`},
 		{"config-sync on ecs", ecsBase, "pipeline:\n  - uses: citadel/build\n  - uses: citadel/deploy\n  - uses: citadel/config-sync\n", `citadel/config-sync is only for the lambda runtime`},
 		{"rollback before deploy", ecsBase, "pipeline:\n  - uses: citadel/build\n  - name: h\n    http: https://x\n    rollback_on_failure: true\n  - uses: citadel/deploy\n", `rollback_on_failure needs citadel/deploy earlier in the pipeline`},
+		{"deploy outside build envs", ecsBase, "pipeline:\n  - uses: citadel/build\n    envs: [dev]\n  - uses: citadel/deploy\n", `pipeline[1] "deploy": runs in environments where citadel/build does not (build envs: dev)`},
+		{"cdk outside build envs", ecsBase, "pipeline:\n  - uses: citadel/build\n    envs: [dev]\n  - uses: citadel/cdk\n    envs: [dev, prod]\n", `pipeline[1] "cdk": runs in environments where citadel/build does not (build envs: dev)`},
+		{"task outside build envs", ecsBase, "pipeline:\n  - uses: citadel/build\n    envs: [dev]\n  - name: m\n    task: migrate\n    envs: [prod]\n", `pipeline[1] "m": runs in environments where citadel/build does not (build envs: dev)`},
 		{"empty task list", ecsBase, "pipeline:\n  - uses: citadel/build\n  - name: m\n    task: []\n", `set exactly one of uses, run, task, http`},
 	}
 	for _, c := range cases {
@@ -138,6 +141,25 @@ func TestPipeline_ValidationErrors(t *testing.T) {
 				t.Fatalf("error = %v, want it to contain %q", err, c.want)
 			}
 		})
+	}
+}
+
+func TestPipeline_StepsWithinBuildEnvsAreValid(t *testing.T) {
+	_, err := parseWith(t, ecsBase, `pipeline:
+  - uses: citadel/build
+    envs: [dev, prod]
+  - name: m
+    task: migrate
+    envs: [dev]
+  - uses: citadel/cdk
+    envs: [prod, dev]
+  - uses: citadel/deploy
+    envs: [dev]
+  - name: t
+    run: echo anywhere
+`)
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
