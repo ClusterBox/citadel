@@ -59,6 +59,23 @@ func TestGetFunctionEnv_PropagatesError(t *testing.T) {
 	}
 }
 
+type fakeFunctionCodeAPI struct{ out *lambda.GetFunctionOutput }
+
+func (f fakeFunctionCodeAPI) GetFunction(_ context.Context, _ *lambda.GetFunctionInput, _ ...func(*lambda.Options)) (*lambda.GetFunctionOutput, error) {
+	return f.out, nil
+}
+
+func TestFunctionImage(t *testing.T) {
+	img := "111111111111.dkr.ecr.us-east-1.amazonaws.com/smaug-dev-repo:abc"
+	got, err := functionImage(context.Background(), fakeFunctionCodeAPI{out: &lambda.GetFunctionOutput{Code: &lambdatypes.FunctionCodeLocation{ImageUri: &img}}}, "smaug-dev")
+	if err != nil || got != img {
+		t.Fatalf("got %q, %v", got, err)
+	}
+	if _, err := functionImage(context.Background(), fakeFunctionCodeAPI{out: &lambda.GetFunctionOutput{}}, "smaug-dev"); err == nil {
+		t.Fatal("expected an error for a zip-packaged function")
+	}
+}
+
 func TestUpdateFunctionEnv_SendsMergedMap(t *testing.T) {
 	api := &fakeFunctionConfigAPI{}
 	merged := map[string]string{"STAGE": "dev", "CITADEL_SSM_PREFIX": "/smaug-dev"}

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/ClusterBox/citadel/internal/aws"
 	"github.com/ClusterBox/citadel/internal/deploydb"
@@ -54,7 +56,8 @@ Single source of truth: citadel.yml defines everything about your deployment.`,
 				return fmt.Errorf("--env is required")
 			}
 
-			ctx := context.Background()
+			ctx, stop := deployContext()
+			defer stop()
 
 			envFile, _ := cmd.Flags().GetString("env-file")
 			deployInfra, _ := cmd.Flags().GetBool("deploy-infra")
@@ -303,4 +306,17 @@ Single source of truth: citadel.yml defines everything about your deployment.`,
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
+}
+
+// deployContext is cancelled by the first Ctrl-C/SIGTERM so running steps
+// stop cleanly (run: process groups are terminated, task: calls StopTask).
+// The first signal also restores default handling, so a second one
+// force-exits citadel.
+func deployContext() (context.Context, context.CancelFunc) {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-ctx.Done()
+		stop()
+	}()
+	return ctx, stop
 }
