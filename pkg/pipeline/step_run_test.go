@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -129,5 +130,75 @@ func TestRunStep_DryRunDoesNotExecute(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "[dry-run] Would run: touch "+marker+" dev") {
 		t.Fatalf("out = %q", out.String())
+	}
+}
+
+// TestRunStep_BackgroundChildDoesNotHangSuccess covers ruling R9: a
+// successful command whose background child keeps stdout open must return
+// promptly, and the child must not outlive the step.
+func TestRunStep_BackgroundChildDoesNotHangSuccess(t *testing.T) {
+	sc := runCtx(t)
+	pidFile := filepath.Join(t.TempDir(), "child.pid")
+	s := newRunStep(config.PipelineStep{Name: "t", Timeout: "20s",
+		Run: `sleep 30 & echo $! > ` + pidFile + `; echo ok`})
+	s.killGrace = 500 * time.Millisecond
+	var out bytes.Buffer
+	start := time.Now()
+	err := s.Run(context.Background(), sc, &out)
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("step took %s; a background child kept it hanging", elapsed)
+	}
+	if err != nil {
+		t.Fatalf("err = %v, want success", err)
+	}
+	if !strings.Contains(out.String(), "ok") {
+		t.Fatalf("out = %q", out.String())
+	}
+	data, rerr := os.ReadFile(pidFile)
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	pid, _ := strconv.Atoi(strings.TrimSpace(string(data)))
+	gone := false
+	for i := 0; i < 50 && !gone; i++ { // allow init to reap the killed child
+		gone = syscall.Kill(pid, 0) != nil
+		if !gone {
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+	if !gone {
+		syscall.Kill(pid, syscall.SIGKILL)
+		t.Fatalf("background child %d outlived the step", pid)
+	}
+}
+
+// TestRunStep_TimeoutReturnsWhenEscapedChildHoldsOutput covers the other half
+// of R9: a process that left the group (setsid) but holds stdout must not
+// make terminate() block forever.
+func TestRunStep_TimeoutReturnsWhenEscapedChildHoldsOutput(t *testing.T) {
+	if _, err := exec.LookPath("setsid"); err != nil {
+		t.Skip("setsid not available")
+	}
+	sc := runCtx(t)
+	pidFile := filepath.Join(t.TempDir(), "escaped.pid")
+	s := newRunStep(config.PipelineStep{Name: "t", Timeout: "200ms",
+		Run: `setsid sh -c 'echo $$ > ` + pidFile + `; exec sleep 30' & sleep 600`})
+	s.killGrace = 100 * time.Millisecond
+	t.Cleanup(func() {
+		if data, err := os.ReadFile(pidFile); err == nil {
+			if pid, _ := strconv.Atoi(strings.TrimSpace(string(data))); pid > 0 {
+				syscall.Kill(pid, syscall.SIGKILL)
+			}
+		}
+	})
+	done := make(chan error, 1)
+	go func() { done <- s.Run(context.Background(), sc, &bytes.Buffer{}) }()
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "timed out after 200ms") {
+			t.Fatalf("err = %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("run step hung after its timeout")
 	}
 }

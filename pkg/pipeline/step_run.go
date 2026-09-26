@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -75,9 +76,13 @@ func (s *runStep) Run(ctx context.Context, sc *StepContext, w io.Writer) error {
 	cmd.Stdout = w
 	cmd.Stderr = w
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// A background child that inherits stdout would keep Wait blocked on
+	// the output copier after the shell exits; WaitDelay bounds that.
+	cmd.WaitDelay = s.waitDelay()
 	if err := cmd.Start(); err != nil {
 		return err
 	}
+	pgid := cmd.Process.Pid
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 
@@ -85,28 +90,58 @@ func (s *runStep) Run(ctx context.Context, sc *StepContext, w io.Writer) error {
 	defer timer.Stop()
 	select {
 	case err := <-done:
+		s.stopGroup(pgid)
+		if errors.Is(err, exec.ErrWaitDelay) {
+			return nil // exited 0; only a leftover child still held the output
+		}
 		return err
 	case <-timer.C:
-		s.terminate(cmd, done)
+		s.terminate(pgid, done)
 		return fmt.Errorf("timed out after %s", s.timeout)
 	case <-ctx.Done():
-		s.terminate(cmd, done)
+		s.terminate(pgid, done)
 		return ctx.Err()
 	}
 }
 
+// waitDelay is how long Wait waits for the output pipes after the shell
+// exits (2s, or the kill grace when that is shorter).
+func (s *runStep) waitDelay() time.Duration {
+	return min(2*time.Second, s.killGrace)
+}
+
 // terminate stops the whole process group: SIGTERM, then SIGKILL after the
-// grace period, so background children never outlive the step.
-func (s *runStep) terminate(cmd *exec.Cmd, done <-chan error) {
-	pgid := -cmd.Process.Pid
-	_ = syscall.Kill(pgid, syscall.SIGTERM)
+// grace period, so background children never outlive the step. It never
+// blocks forever, even if a process that left the group holds the output.
+func (s *runStep) terminate(pgid int, done <-chan error) {
+	_ = syscall.Kill(-pgid, syscall.SIGTERM)
 	select {
 	case <-done:
 	case <-time.After(s.killGrace):
-		_ = syscall.Kill(pgid, syscall.SIGKILL)
-		<-done
+		_ = syscall.Kill(-pgid, syscall.SIGKILL)
+		select {
+		case <-done:
+		case <-time.After(s.waitDelay() + time.Second):
+		}
 	}
-	_ = syscall.Kill(pgid, syscall.SIGKILL) // reap stragglers that ignored SIGTERM
+	_ = syscall.Kill(-pgid, syscall.SIGKILL) // reap stragglers that ignored SIGTERM
+}
+
+// stopGroup ends what is left of the process group after the shell exited:
+// SIGTERM, then SIGKILL after the grace period.
+func (s *runStep) stopGroup(pgid int) {
+	if syscall.Kill(-pgid, 0) != nil {
+		return // nothing left
+	}
+	_ = syscall.Kill(-pgid, syscall.SIGTERM)
+	deadline := time.Now().Add(s.killGrace)
+	for time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+		if syscall.Kill(-pgid, 0) != nil {
+			return
+		}
+	}
+	_ = syscall.Kill(-pgid, syscall.SIGKILL)
 }
 
 // citadelEnv exposes the pipeline variables to run steps as CITADEL_* vars.
