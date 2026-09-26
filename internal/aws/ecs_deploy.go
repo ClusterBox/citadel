@@ -119,16 +119,15 @@ func currentTaskDefinition(ctx context.Context, api ecsDeployAPI, cluster, servi
 // repository matches imageURI's. td itself is not modified.
 func revisionWithImage(td *ecstypes.TaskDefinition, tags []ecstypes.Tag, imageURI string) (*ecs.RegisterTaskDefinitionInput, error) {
 	repo := imageRepository(imageURI)
-	containers := make([]ecstypes.ContainerDefinition, len(td.ContainerDefinitions))
-	copy(containers, td.ContainerDefinitions)
+	in := copyTaskDefinition(td, tags)
 
 	matched := 0
 	var seen []string
-	for i := range containers {
-		img := aws.ToString(containers[i].Image)
+	for i := range in.ContainerDefinitions {
+		img := aws.ToString(in.ContainerDefinitions[i].Image)
 		seen = append(seen, img)
 		if imageRepository(img) == repo {
-			containers[i].Image = aws.String(imageURI)
+			in.ContainerDefinitions[i].Image = aws.String(imageURI)
 			matched++
 		}
 	}
@@ -136,7 +135,15 @@ func revisionWithImage(td *ecstypes.TaskDefinition, tags []ecstypes.Tag, imageUR
 		return nil, fmt.Errorf("no container in task definition %s uses repository %s (images: %s)",
 			aws.ToString(td.Family), repo, strings.Join(seen, ", "))
 	}
+	return in, nil
+}
 
+// copyTaskDefinition copies every registrable field of td (and its tags)
+// into a RegisterTaskDefinitionInput. The container list is a copy, so
+// changing it leaves td untouched.
+func copyTaskDefinition(td *ecstypes.TaskDefinition, tags []ecstypes.Tag) *ecs.RegisterTaskDefinitionInput {
+	containers := make([]ecstypes.ContainerDefinition, len(td.ContainerDefinitions))
+	copy(containers, td.ContainerDefinitions)
 	if len(tags) == 0 {
 		tags = nil
 	}
@@ -159,7 +166,7 @@ func revisionWithImage(td *ecstypes.TaskDefinition, tags []ecstypes.Tag, imageUR
 		InferenceAccelerators:   td.InferenceAccelerators,
 		EnableFaultInjection:    td.EnableFaultInjection,
 		Tags:                    tags,
-	}, nil
+	}
 }
 
 // imageRepository strips an image reference's tag or digest:
