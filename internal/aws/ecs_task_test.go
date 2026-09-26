@@ -25,8 +25,12 @@ type fakeTaskAPI struct {
 	runOut    *ecs.RunTaskOutput
 	statuses  []ecstypes.Task // returned by successive DescribeTasks calls; last repeats
 	describes int
-	stopped   *ecs.StopTaskInput
-	stopErr   error
+	// describeErrs[i] fails the i-th DescribeTasks call; describeErr fails
+	// every call.
+	describeErrs []error
+	describeErr  error
+	stopped      *ecs.StopTaskInput
+	stopErr      error
 	// what StopTask's context looked like when it was called
 	stopCtxErr   error
 	stopDeadline time.Time
@@ -46,6 +50,14 @@ func (f *fakeTaskAPI) RunTask(_ context.Context, in *ecs.RunTaskInput, _ ...func
 
 func (f *fakeTaskAPI) DescribeTasks(_ context.Context, _ *ecs.DescribeTasksInput, _ ...func(*ecs.Options)) (*ecs.DescribeTasksOutput, error) {
 	i := f.describes
+	if f.describeErr != nil {
+		f.describes++
+		return nil, f.describeErr
+	}
+	if i < len(f.describeErrs) && f.describeErrs[i] != nil {
+		f.describes++
+		return nil, f.describeErrs[i]
+	}
 	if i >= len(f.statuses) {
 		i = len(f.statuses) - 1
 	}
@@ -257,5 +269,61 @@ func TestRunOneOffTask_StopTaskErrorIsReported(t *testing.T) {
 	}
 	if want := "   ⚠️  could not stop task abc123: AccessDenied — it may still be running\n"; !strings.Contains(out.String(), want) {
 		t.Fatalf("out = %q, want it to contain %q", out.String(), want)
+	}
+}
+
+// TestRunOneOffTask_PersistentDescribeErrorFailsFast covers ruling R12: an
+// AccessDenied on DescribeTasks must not look like a 30-minute timeout.
+func TestRunOneOffTask_PersistentDescribeErrorFailsFast(t *testing.T) {
+	api := newTaskAPI(testRepo+":new", running())
+	api.describeErr = errors.New("AccessDeniedException: not authorized to perform ecs:DescribeTasks")
+	spec := migrate
+	spec.Timeout = 30 * time.Minute
+	start := time.Now()
+	err := runOneOffTask(context.Background(), api, &fakeLogs{}, &bytes.Buffer{}, "c", "s", testRepo+":new", spec, time.Millisecond)
+	if time.Since(start) > 5*time.Second {
+		t.Fatalf("took %s; persistent DescribeTasks errors must fail fast", time.Since(start))
+	}
+	want := "could not check task abc123: AccessDeniedException: not authorized to perform ecs:DescribeTasks (the task may still be running)"
+	if err == nil || err.Error() != want {
+		t.Fatalf("err = %v, want %q", err, want)
+	}
+	if api.describes != 5 {
+		t.Fatalf("DescribeTasks called %d times, want 5", api.describes)
+	}
+	if api.stopped == nil || aws.ToString(api.stopped.Task) != taskARN {
+		t.Fatal("StopTask was not attempted")
+	}
+}
+
+func TestRunOneOffTask_TransientDescribeErrorRecovers(t *testing.T) {
+	api := newTaskAPI(testRepo+":new", running(), running(), stoppedWith(aws.Int32(0), "Essential container exited"))
+	api.describeErrs = []error{errors.New("ThrottlingException")}
+	if err := runOneOffTask(context.Background(), api, &fakeLogs{}, &bytes.Buffer{}, "c", "s", testRepo+":new", migrate, time.Millisecond); err != nil {
+		t.Fatalf("err = %v, want success after a transient error", err)
+	}
+	if api.stopped != nil {
+		t.Fatal("stopped a task that finished")
+	}
+}
+
+func TestRunOneOffTask_ErrorStreakResetsOnSuccess(t *testing.T) {
+	boom := errors.New("ThrottlingException")
+	api := newTaskAPI(testRepo+":new", running(), running(), running(), running(), running(), stoppedWith(aws.Int32(0), ""))
+	// 4 errors, a success, 4 errors, then STOPPED: never 5 in a row.
+	api.describeErrs = []error{boom, boom, boom, boom, nil, boom, boom, boom, boom}
+	if err := runOneOffTask(context.Background(), api, &fakeLogs{}, &bytes.Buffer{}, "c", "s", testRepo+":new", migrate, time.Millisecond); err != nil {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestRunOneOffTask_TimeoutMentionsLastDescribeError(t *testing.T) {
+	api := newTaskAPI(testRepo+":new", running())
+	api.describeErrs = []error{errors.New("ThrottlingException")}
+	spec := migrate
+	spec.Timeout = 20 * time.Millisecond
+	err := runOneOffTask(context.Background(), api, &fakeLogs{}, &bytes.Buffer{}, "c", "s", testRepo+":new", spec, time.Millisecond)
+	if err == nil || err.Error() != "task timed out after 20ms (last error checking it: ThrottlingException)" {
+		t.Fatalf("err = %v", err)
 	}
 }

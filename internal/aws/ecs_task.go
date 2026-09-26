@@ -125,12 +125,26 @@ func runOneOffTask(ctx context.Context, api ecsTaskAPI, logs taskLogsAPI, w io.W
 	defer cancel()
 	follower := newLogFollower(logs, target, arn)
 
+	// DescribeTasks errors (throttling, AccessDenied) are retried, but a
+	// streak of them fails the step instead of waiting out the timeout.
+	var lastErr error
+	failures := 0
 	for {
 		follower.drain(runCtx, w)
 		t, err := describeTask(runCtx, api, cluster, arn)
-		if err == nil && aws.ToString(t.LastStatus) == "STOPPED" {
-			follower.drain(context.WithoutCancel(ctx), w)
-			return taskOutcome(t, aws.ToString(target.Name))
+		switch {
+		case err == nil:
+			failures = 0
+			if aws.ToString(t.LastStatus) == "STOPPED" {
+				follower.drain(context.WithoutCancel(ctx), w)
+				return taskOutcome(t, aws.ToString(target.Name))
+			}
+		case runCtx.Err() == nil: // not just our own timeout/cancel
+			lastErr = err
+			if failures++; failures >= maxDescribeFailures {
+				stopTask(ctx, api, w, cluster, arn, "citadel: could not check the task")
+				return fmt.Errorf("could not check task %s: %w (the task may still be running)", taskID(arn), lastErr)
+			}
 		}
 		select {
 		case <-runCtx.Done():
@@ -138,11 +152,18 @@ func runOneOffTask(ctx context.Context, api ecsTaskAPI, logs taskLogsAPI, w io.W
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
+			if lastErr != nil {
+				return fmt.Errorf("task timed out after %s (last error checking it: %w)", timeout, lastErr)
+			}
 			return fmt.Errorf("task timed out after %s", timeout)
 		case <-time.After(poll):
 		}
 	}
 }
+
+// maxDescribeFailures is how many DescribeTasks errors in a row end a task
+// step.
+const maxDescribeFailures = 5
 
 // stopTask asks ECS to stop the task. It runs even when ctx is cancelled
 // (Ctrl-C must not leave the task running) but gives up after 30s; a failure
