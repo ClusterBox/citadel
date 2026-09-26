@@ -135,6 +135,10 @@ func TestPipeline_ValidationErrors(t *testing.T) {
 		{"misspelled envs", ecsBase, "pipeline:\n  - name: t\n    run: a\n    environment: [dev]\n", `pipeline[0] "t": unknown key "environment"`},
 		{"misspelled rollback", ecsBase, "pipeline:\n  - uses: citadel/build\n  - uses: citadel/deploy\n  - name: h\n    http: https://x\n    rollback-on-failure: true\n", `pipeline[2] "h": unknown key "rollback-on-failure"`},
 		{"unknown key lists valid keys", ecsBase, "pipeline:\n  - uses: citadel/build\n    env_file: x\n", `(line 10; valid keys: name, uses, run, task, http, shell, working_directory, env, container, expect_status, retries, interval, request_timeout, rollback_on_failure, envs, continue_on_error, timeout)`},
+		{"continue with rollback", ecsBase, "pipeline:\n  - uses: citadel/build\n  - uses: citadel/deploy\n  - name: h\n    http: https://x\n    rollback_on_failure: true\n    continue_on_error: true\n", `pipeline[2] "h": continue_on_error and rollback_on_failure cannot be combined`},
+		{"continue on build", ecsBase, "pipeline:\n  - uses: citadel/build\n    continue_on_error: true\n", `pipeline[0] "build": continue_on_error is not allowed on citadel/build`},
+		{"continue on cdk", ecsBase, "pipeline:\n  - uses: citadel/build\n  - uses: citadel/cdk\n    continue_on_error: true\n", `pipeline[1] "cdk": continue_on_error is not allowed on citadel/cdk`},
+		{"continue on deploy", ecsBase, "pipeline:\n  - uses: citadel/build\n  - uses: citadel/deploy\n    continue_on_error: true\n", `pipeline[1] "deploy": continue_on_error is not allowed on citadel/deploy`},
 		{"empty task list", ecsBase, "pipeline:\n  - uses: citadel/build\n  - name: m\n    task: []\n", `set exactly one of uses, run, task, http`},
 	}
 	for _, c := range cases {

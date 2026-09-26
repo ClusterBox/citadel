@@ -410,6 +410,16 @@ func (c *DeployConfig) validatePipeline() error {
 		if msg := s.misplacedField(kind); msg != "" {
 			return errf("%s", msg)
 		}
+		// A failed service change must never be recorded as a success.
+		if s.ContinueOnError {
+			if s.RollbackOnFailure {
+				return errf("continue_on_error and rollback_on_failure cannot be combined")
+			}
+			switch b := s.Builtin(); b {
+			case StepBuild, StepCDK, StepDeploy:
+				return errf("continue_on_error is not allowed on citadel/%s", b)
+			}
+		}
 		for field, v := range map[string]string{"timeout": s.Timeout, "interval": s.Interval, "request_timeout": s.RequestTimeout} {
 			if v == "" {
 				continue
