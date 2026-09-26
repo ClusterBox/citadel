@@ -26,6 +26,10 @@ type fakeTaskAPI struct {
 	statuses  []ecstypes.Task // returned by successive DescribeTasks calls; last repeats
 	describes int
 	stopped   *ecs.StopTaskInput
+	stopErr   error
+	// what StopTask's context looked like when it was called
+	stopCtxErr   error
+	stopDeadline time.Time
 }
 
 func (f *fakeTaskAPI) DescribeServices(_ context.Context, _ *ecs.DescribeServicesInput, _ ...func(*ecs.Options)) (*ecs.DescribeServicesOutput, error) {
@@ -49,8 +53,13 @@ func (f *fakeTaskAPI) DescribeTasks(_ context.Context, _ *ecs.DescribeTasksInput
 	return &ecs.DescribeTasksOutput{Tasks: []ecstypes.Task{f.statuses[i]}}, nil
 }
 
-func (f *fakeTaskAPI) StopTask(_ context.Context, in *ecs.StopTaskInput, _ ...func(*ecs.Options)) (*ecs.StopTaskOutput, error) {
+func (f *fakeTaskAPI) StopTask(ctx context.Context, in *ecs.StopTaskInput, _ ...func(*ecs.Options)) (*ecs.StopTaskOutput, error) {
 	f.stopped = in
+	f.stopCtxErr = ctx.Err()
+	f.stopDeadline, _ = ctx.Deadline()
+	if f.stopErr != nil {
+		return nil, f.stopErr
+	}
 	return &ecs.StopTaskOutput{}, nil
 }
 
@@ -217,5 +226,36 @@ func TestRunOneOffTask_CancelStopsTask(t *testing.T) {
 	}
 	if api.stopped == nil {
 		t.Fatal("StopTask was not called on cancel")
+	}
+}
+
+func TestRunOneOffTask_StopTaskIsBoundedAndSurvivesCancel(t *testing.T) {
+	api := newTaskAPI(testRepo+":new", running())
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { time.Sleep(20 * time.Millisecond); cancel() }()
+	_ = runOneOffTask(ctx, api, &fakeLogs{}, &bytes.Buffer{}, "c", "s", testRepo+":new", migrate, time.Millisecond)
+	if api.stopped == nil {
+		t.Fatal("StopTask was not called on cancel")
+	}
+	if api.stopCtxErr != nil {
+		t.Fatalf("StopTask ran with a cancelled context: %v", api.stopCtxErr)
+	}
+	if api.stopDeadline.IsZero() || time.Until(api.stopDeadline) > 30*time.Second {
+		t.Fatalf("StopTask context deadline = %v, want one at most 30s away", api.stopDeadline)
+	}
+}
+
+func TestRunOneOffTask_StopTaskErrorIsReported(t *testing.T) {
+	api := newTaskAPI(testRepo+":new", running())
+	api.stopErr = errors.New("AccessDenied")
+	spec := migrate
+	spec.Timeout = 20 * time.Millisecond
+	var out bytes.Buffer
+	err := runOneOffTask(context.Background(), api, &fakeLogs{}, &out, "c", "s", testRepo+":new", spec, time.Millisecond)
+	if err == nil || !strings.Contains(err.Error(), "timed out after 20ms") {
+		t.Fatalf("err = %v", err)
+	}
+	if want := "   ⚠️  could not stop task abc123: AccessDenied — it may still be running\n"; !strings.Contains(out.String(), want) {
+		t.Fatalf("out = %q, want it to contain %q", out.String(), want)
 	}
 }

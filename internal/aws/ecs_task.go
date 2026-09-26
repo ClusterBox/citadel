@@ -134,16 +134,27 @@ func runOneOffTask(ctx context.Context, api ecsTaskAPI, logs taskLogsAPI, w io.W
 		}
 		select {
 		case <-runCtx.Done():
-			_, _ = api.StopTask(context.WithoutCancel(ctx), &ecs.StopTaskInput{
-				Cluster: aws.String(cluster), Task: aws.String(arn),
-				Reason: aws.String("citadel: task step timed out or was cancelled"),
-			})
+			stopTask(ctx, api, w, cluster, arn, "citadel: task step timed out or was cancelled")
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
 			return fmt.Errorf("task timed out after %s", timeout)
 		case <-time.After(poll):
 		}
+	}
+}
+
+// stopTask asks ECS to stop the task. It runs even when ctx is cancelled
+// (Ctrl-C must not leave the task running) but gives up after 30s; a failure
+// is reported, not returned, since the step already failed.
+func stopTask(ctx context.Context, api ecsTaskAPI, w io.Writer, cluster, arn, reason string) {
+	sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	_, err := api.StopTask(sctx, &ecs.StopTaskInput{
+		Cluster: aws.String(cluster), Task: aws.String(arn), Reason: aws.String(reason),
+	})
+	if err != nil {
+		fmt.Fprintf(w, "   ⚠️  could not stop task %s: %v — it may still be running\n", taskID(arn), err)
 	}
 }
 

@@ -58,6 +58,11 @@ func execute(ctx context.Context, sc *StepContext, run *project.Run, out io.Writ
 			case ps.opts.continueOnError:
 				fmt.Fprintf(out, "⚠️  %s failed; continuing: %v\n", name, wrapped)
 				continue
+			case ps.opts.rollback && ctx.Err() != nil:
+				// A cancelled deploy (Ctrl-C/SIGTERM) must stop, not start
+				// another service change the user can no longer interrupt.
+				fmt.Fprintf(out, "↩️  Not rolling back: deploy was cancelled\n")
+				return wrapped
 			case ps.opts.rollback:
 				return rollbackAfter(ctx, sc, run, fmt.Errorf("%s: %w", name, wrapped))
 			default:

@@ -309,3 +309,46 @@ func stepSummary(r runRecord) []string {
 	}
 	return out
 }
+
+// cancelStep cancels the deploy while it runs and returns ctx.Err(), like a
+// run: or task: step interrupted by Ctrl-C.
+type cancelStep struct{ cancel context.CancelFunc }
+
+func (cancelStep) Name() string                                                { return "smoke" }
+func (cancelStep) Plan(context.Context, *StepContext, io.Writer) (bool, error) { return false, nil }
+func (s cancelStep) Run(ctx context.Context, _ *StepContext, _ io.Writer) error {
+	s.cancel()
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func TestExecute_CancelledDeployDoesNotRollBack(t *testing.T) {
+	sc, run, out := newExecHarness(t)
+	var calls []string
+	sc.needSnapshot = true
+	sc.ops.snapshot = func(context.Context, *config.DeployConfig, string) (string, error) { return "td:7", nil }
+	rollbacks := 0
+	sc.ops.rollback = func(context.Context, io.Writer, *config.DeployConfig, string, string) error {
+		rollbacks++
+		return nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err := execute(ctx, sc, run, out, steps(
+		plannedStep{Step: &fakeStep{name: "deploy", changes: true, calls: &calls}},
+		plannedStep{Step: cancelStep{cancel}, opts: stepOptions{rollback: true}},
+	))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	if rollbacks != 0 {
+		t.Fatalf("rolled back %d times after a cancellation", rollbacks)
+	}
+	if !strings.Contains(out.String(), "↩️  Not rolling back: deploy was cancelled\n") {
+		t.Fatalf("out = %q", out.String())
+	}
+	run.Finish(err, project.State{})
+	if want := []string{"deploy:success", "smoke:failed"}; !reflect.DeepEqual(stepSummary(readRun(t, run.Dir())), want) {
+		t.Fatalf("steps = %v", stepSummary(readRun(t, run.Dir())))
+	}
+}
