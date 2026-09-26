@@ -66,8 +66,8 @@ type PipelineStep struct {
 
 	Container string `yaml:"container,omitempty"`
 
-	ExpectStatus      int    `yaml:"expect_status,omitempty"`
-	Retries           int    `yaml:"retries,omitempty"`
+	ExpectStatus      *int   `yaml:"expect_status,omitempty"` // nil = default; 0 is invalid
+	Retries           *int   `yaml:"retries,omitempty"`       // nil = default; 0 is invalid
 	Interval          string `yaml:"interval,omitempty"`
 	RequestTimeout    string `yaml:"request_timeout,omitempty"`
 	RollbackOnFailure bool   `yaml:"rollback_on_failure,omitempty"`
@@ -242,16 +242,16 @@ func (s PipelineStep) RequestTimeoutOrDefault() time.Duration {
 
 // RetriesOrDefault is the number of http attempts (default 10).
 func (s PipelineStep) RetriesOrDefault() int {
-	if s.Retries > 0 {
-		return s.Retries
+	if s.Retries != nil {
+		return *s.Retries
 	}
 	return 10
 }
 
 // ExpectStatusOrDefault is the http status that means healthy (default 200).
 func (s PipelineStep) ExpectStatusOrDefault() int {
-	if s.ExpectStatus != 0 {
-		return s.ExpectStatus
+	if s.ExpectStatus != nil {
+		return *s.ExpectStatus
 	}
 	return 200
 }
@@ -318,9 +318,9 @@ func (s PipelineStep) misplacedField(kind StepKind) string {
 		return "env only applies to run steps"
 	case kind != KindTask && s.Container != "":
 		return "container only applies to task steps"
-	case kind != KindHTTP && s.ExpectStatus != 0:
+	case kind != KindHTTP && s.ExpectStatus != nil:
 		return "expect_status only applies to http steps"
-	case kind != KindHTTP && s.Retries != 0:
+	case kind != KindHTTP && s.Retries != nil:
 		return "retries only applies to http steps"
 	case kind != KindHTTP && s.Interval != "":
 		return "interval only applies to http steps"
@@ -428,10 +428,10 @@ func (c *DeployConfig) validatePipeline() error {
 				return errf("%s: invalid duration %q", field, v)
 			}
 		}
-		if s.Retries < 0 {
+		if s.Retries != nil && *s.Retries < 1 {
 			return errf("retries must be at least 1")
 		}
-		if s.ExpectStatus != 0 && (s.ExpectStatus < 100 || s.ExpectStatus > 599) {
+		if s.ExpectStatus != nil && (*s.ExpectStatus < 100 || *s.ExpectStatus > 599) {
 			return errf("expect_status must be between 100 and 599")
 		}
 

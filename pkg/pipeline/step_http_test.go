@@ -25,7 +25,7 @@ func TestHTTPStep_SucceedsAfterRetries(t *testing.T) {
 		w.Write([]byte("secret body"))
 	}))
 	defer srv.Close()
-	s := newHTTPStep(config.PipelineStep{Name: "smoke", HTTP: srv.URL + "/${env}", Retries: 5})
+	s := newHTTPStep(config.PipelineStep{Name: "smoke", HTTP: srv.URL + "/${env}", Retries: intp(5)})
 	s.sleep = noSleep
 	var out bytes.Buffer
 	if err := s.Run(context.Background(), runCtx(t), &out); err != nil {
@@ -42,7 +42,7 @@ func TestHTTPStep_SucceedsAfterRetries(t *testing.T) {
 func TestHTTPStep_FailsAfterAllAttempts(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(500) }))
 	defer srv.Close()
-	s := newHTTPStep(config.PipelineStep{Name: "smoke", HTTP: srv.URL, Retries: 2})
+	s := newHTTPStep(config.PipelineStep{Name: "smoke", HTTP: srv.URL, Retries: intp(2)})
 	s.sleep = noSleep
 	err := s.Run(context.Background(), runCtx(t), &bytes.Buffer{})
 	if err == nil || err.Error() != "health check failed after 2 attempts (last: 500)" {
@@ -53,14 +53,14 @@ func TestHTTPStep_FailsAfterAllAttempts(t *testing.T) {
 func TestHTTPStep_ExpectStatus(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) }))
 	defer srv.Close()
-	s := newHTTPStep(config.PipelineStep{Name: "smoke", HTTP: srv.URL, ExpectStatus: 204, Retries: 1})
+	s := newHTTPStep(config.PipelineStep{Name: "smoke", HTTP: srv.URL, ExpectStatus: intp(204), Retries: intp(1)})
 	if err := s.Run(context.Background(), runCtx(t), &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestHTTPStep_ConnectionErrorIsReported(t *testing.T) {
-	s := newHTTPStep(config.PipelineStep{Name: "smoke", HTTP: "http://127.0.0.1:1/health", Retries: 1, RequestTimeout: "200ms"})
+	s := newHTTPStep(config.PipelineStep{Name: "smoke", HTTP: "http://127.0.0.1:1/health", Retries: intp(1), RequestTimeout: "200ms"})
 	err := s.Run(context.Background(), runCtx(t), &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "health check failed after 1 attempts (last:") {
 		t.Fatalf("err = %v", err)
@@ -78,3 +78,5 @@ func TestHTTPStep_DryRun(t *testing.T) {
 		t.Fatalf("out = %q", out.String())
 	}
 }
+
+func intp(n int) *int { return &n }
