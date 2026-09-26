@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"reflect"
 	"regexp"
 	"slices"
 	"sort"
@@ -74,6 +75,71 @@ type PipelineStep struct {
 	Envs            []string `yaml:"envs,omitempty"`
 	ContinueOnError bool     `yaml:"continue_on_error,omitempty"`
 	Timeout         string   `yaml:"timeout,omitempty"`
+}
+
+// PipelineSteps is citadel.yml's pipeline: list. Decoding errors name the
+// step as pipeline[<i>] "<name>", like validation errors.
+type PipelineSteps []PipelineStep
+
+// UnmarshalYAML decodes each step, labelling its errors with its position.
+func (p *PipelineSteps) UnmarshalYAML(n *yaml.Node) error {
+	if n.Kind != yaml.SequenceNode {
+		return fmt.Errorf("line %d: pipeline: must be a list of steps", n.Line)
+	}
+	steps := make(PipelineSteps, len(n.Content))
+	for i, item := range n.Content {
+		if err := item.Decode(&steps[i]); err != nil {
+			return fmt.Errorf("pipeline[%d] %q: %w", i, rawStepName(item), err)
+		}
+	}
+	*p = steps
+	return nil
+}
+
+// rawStepName is the step's name (or built-in name) read straight from its
+// YAML mapping, for errors raised before the step is decoded.
+func rawStepName(n *yaml.Node) string {
+	if n.Kind != yaml.MappingNode {
+		return ""
+	}
+	var uses string
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		switch n.Content[i].Value {
+		case "name":
+			return n.Content[i+1].Value
+		case "uses":
+			uses = strings.TrimPrefix(n.Content[i+1].Value, usesPrefix)
+		}
+	}
+	return uses
+}
+
+// pipelineStepKeys are the keys a pipeline step may use, in declaration
+// order (read from PipelineStep's yaml tags so they cannot drift).
+var pipelineStepKeys = func() []string {
+	t := reflect.TypeOf(PipelineStep{})
+	keys := make([]string, 0, t.NumField())
+	for i := 0; i < t.NumField(); i++ {
+		if k, _, _ := strings.Cut(t.Field(i).Tag.Get("yaml"), ","); k != "" && k != "-" {
+			keys = append(keys, k)
+		}
+	}
+	return keys
+}()
+
+// UnmarshalYAML rejects unknown keys (a misspelled `environment:` or
+// `rollback-on-failure:` would otherwise be silently ignored).
+func (s *PipelineStep) UnmarshalYAML(n *yaml.Node) error {
+	if n.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			k := n.Content[i]
+			if !slices.Contains(pipelineStepKeys, k.Value) {
+				return fmt.Errorf("unknown key %q (line %d; valid keys: %s)", k.Value, k.Line, strings.Join(pipelineStepKeys, ", "))
+			}
+		}
+	}
+	type plain PipelineStep // no UnmarshalYAML: avoids recursion
+	return n.Decode((*plain)(s))
 }
 
 // TaskCommand is a task: value — a string (run as `sh -c`) or a list (the

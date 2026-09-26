@@ -33,7 +33,7 @@ type DeployConfig struct {
 	ECS          *ECSConfig           `yaml:"ecs,omitempty"`
 	VPC          *VPCConfig           `yaml:"vpc,omitempty"`
 	CloudFront   *CloudFrontConfig    `yaml:"cloudfront,omitempty"`
-	Pipeline     []PipelineStep       `yaml:"pipeline,omitempty"`
+	Pipeline     PipelineSteps        `yaml:"pipeline,omitempty"`
 }
 
 // LambdaConfig declares Lambda-specific metadata. functionName is optional;
