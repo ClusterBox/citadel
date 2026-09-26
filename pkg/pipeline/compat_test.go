@@ -29,7 +29,7 @@ func (d fakeDeployer) Update(_ context.Context, w io.Writer, _ *config.DeployCon
 func (d fakeDeployer) WaitStable(_ context.Context, w io.Writer, _ *config.DeployConfig, _ string) error {
 	d.l.calls = append(d.l.calls, "wait")
 	fmt.Fprint(w, "[wait]\n")
-	return nil
+	return d.l.waitErr
 }
 
 type fakeOps struct {
@@ -39,6 +39,8 @@ type fakeOps struct {
 	runsImageErr   error
 	buildErr       error
 	updateErr      error
+	configSyncErr  error
+	waitErr        error
 	recorded       []error
 }
 
@@ -67,7 +69,7 @@ func (l *fakeOps) ops() *ops {
 		configSync: func(_ context.Context, w io.Writer, _ *config.DeployConfig, _ string, dryRun bool) error {
 			l.calls = append(l.calls, fmt.Sprintf("config-sync:%v", dryRun))
 			fmt.Fprint(w, "[config-sync]\n")
-			return nil
+			return l.configSyncErr
 		},
 		recorder: func(context.Context, io.Writer, *config.DeployConfig, *DeployOptions, string, string) func(error) {
 			l.calls = append(l.calls, "record")
@@ -166,6 +168,13 @@ func TestDeploy_DefaultPipelineMatchesPreEngineOutput(t *testing.T) {
 			name: "lambda dry-run", runtime: "lambda",
 			opts:    DeployOptions{EnvFile: ".env", DryRun: true},
 			wantOut: "[ssm-sync]\n" + buildBlock + "[config-sync]\n\n✨ Deployment complete!\n",
+		},
+		{
+			name: "ecs infra wait rolled-by-cdk", runtime: "ecs",
+			opts:      DeployOptions{DeployInfra: true, Wait: true},
+			l:         fakeOps{runsImage: true},
+			wantOut:   buildBlock + cdkBlock + "⏭️  Skipping ECS update (rolled out by CDK)\n[wait]\n\n✨ Deployment complete!\n",
+			wantSteps: []string{"ssm-sync:skipped", "build:success", "cdk:success", "deploy:skipped", "wait:success"},
 		},
 		{
 			name: "ecs dry-run infra", runtime: "ecs",
@@ -270,6 +279,108 @@ func TestDeploy_NoImageFails(t *testing.T) {
 		if strings.HasPrefix(c, "update:") {
 			t.Fatalf("deployed without an image: %v", l.calls)
 		}
+	}
+}
+
+// TestDeploy_DefaultPipelineFailuresMatchPreEngine pins what a failure in
+// deploy, config-sync (non-dry-run) and wait returns, prints and records,
+// as the pre-engine rollout() did.
+func TestDeploy_DefaultPipelineFailuresMatchPreEngine(t *testing.T) {
+	boom := errors.New("boom")
+	cases := []struct {
+		name, runtime string
+		opts          DeployOptions
+		l             fakeOps
+		wantErr       string
+		wantOut       string // after the header
+		wantSteps     []string
+		wantStepErr   string // error of the failed (last) step in run.json
+	}{
+		{
+			name: "ecs deploy update fails", runtime: "ecs",
+			opts:        DeployOptions{Wait: true},
+			l:           fakeOps{updateErr: boom},
+			wantErr:     "failed to update ecs: boom",
+			wantOut:     buildBlock + "🚀 Deploying to ecs...\n[deploy]\n",
+			wantSteps:   []string{"ssm-sync:skipped", "build:success", "cdk:skipped", "deploy:failed"},
+			wantStepErr: "failed to update ecs: boom",
+		},
+		{
+			name: "lambda config-sync fails", runtime: "lambda",
+			opts:        DeployOptions{Wait: true},
+			l:           fakeOps{configSyncErr: boom},
+			wantErr:     "failed to sync function config: boom",
+			wantOut:     buildBlock + "🚀 Deploying to lambda...\n[deploy]\n[config-sync]\n",
+			wantSteps:   []string{"ssm-sync:skipped", "build:success", "cdk:skipped", "deploy:success", "config-sync:failed"},
+			wantStepErr: "boom",
+		},
+		{
+			name: "ecs wait fails", runtime: "ecs",
+			opts:        DeployOptions{Wait: true},
+			l:           fakeOps{waitErr: boom},
+			wantErr:     "deployment did not stabilize: boom",
+			wantOut:     buildBlock + "🚀 Deploying to ecs...\n[deploy]\n[wait]\n",
+			wantSteps:   []string{"ssm-sync:skipped", "build:success", "cdk:skipped", "deploy:success", "wait:failed"},
+			wantStepErr: "boom",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			cfgPath := compatConfig(t, c.runtime, "")
+			var out bytes.Buffer
+			opts := c.opts
+			opts.ConfigPath, opts.Environment, opts.Message, opts.Out = cfgPath, "dev", "m", &out
+			l := c.l
+			err := deployWith(context.Background(), &opts, l.ops())
+			if err == nil || err.Error() != c.wantErr {
+				t.Fatalf("err = %v, want %q", err, c.wantErr)
+			}
+			if want := header(cfgPath) + c.wantOut; out.String() != want {
+				t.Fatalf("output mismatch\n--- got ---\n%s\n--- want ---\n%s", out.String(), want)
+			}
+			r := onlyRun(t, cfgPath)
+			if r.Status != "failed" {
+				t.Fatalf("run status = %s", r.Status)
+			}
+			if got := stepSummary(r); !reflect.DeepEqual(got, c.wantSteps) {
+				t.Fatalf("steps = %v, want %v", got, c.wantSteps)
+			}
+			if last := r.Steps[len(r.Steps)-1]; last.Error != c.wantStepErr {
+				t.Fatalf("run.json step error = %q, want %q", last.Error, c.wantStepErr)
+			}
+			if len(l.recorded) != 1 || !errors.Is(l.recorded[0], boom) {
+				t.Fatalf("deploy history recorded %v, want one failure wrapping %v", l.recorded, boom)
+			}
+		})
+	}
+}
+
+// TestDeploy_NoRolloutCheckWithoutECSInfra: the CDK-rollout check
+// (serviceRunsImage) only runs after an ECS cdk deploy.
+func TestDeploy_NoRolloutCheckWithoutECSInfra(t *testing.T) {
+	for _, c := range []struct {
+		name, runtime string
+		opts          DeployOptions
+	}{
+		{"lambda infra", "lambda", DeployOptions{DeployInfra: true, Wait: true}},
+		{"ecs no infra", "ecs", DeployOptions{Wait: true}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			cfgPath := compatConfig(t, c.runtime, "")
+			opts := c.opts
+			opts.ConfigPath, opts.Environment, opts.Message, opts.Out = cfgPath, "dev", "m", io.Discard
+			l := fakeOps{}
+			if err := deployWith(context.Background(), &opts, l.ops()); err != nil {
+				t.Fatal(err)
+			}
+			for _, call := range l.calls {
+				if call == "check" {
+					t.Fatalf("calls = %v: the CDK-rollout check ran", l.calls)
+				}
+			}
+		})
 	}
 }
 
