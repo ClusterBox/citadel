@@ -435,7 +435,7 @@ func (c *DeployConfig) validatePipeline() error {
 			return errf("expect_status must be between 100 and 599")
 		}
 
-		texts := []string{s.Run, s.HTTP, s.Task.Script, s.WorkingDirectory}
+		texts := []string{s.Run, s.HTTP, s.Task.Script, s.WorkingDirectory, s.Container}
 		texts = append(texts, s.Task.Args...)
 		for _, v := range s.Env {
 			texts = append(texts, v)

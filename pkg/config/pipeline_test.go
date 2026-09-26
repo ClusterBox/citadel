@@ -142,6 +142,7 @@ func TestPipeline_ValidationErrors(t *testing.T) {
 		{"zero retries", ecsBase, "pipeline:\n  - name: h\n    http: https://x\n    retries: 0\n", `pipeline[0] "h": retries must be at least 1`},
 		{"zero status", ecsBase, "pipeline:\n  - name: h\n    http: https://x\n    expect_status: 0\n", `pipeline[0] "h": expect_status must be between 100 and 599`},
 		{"misplaced zero retries", ecsBase, "pipeline:\n  - name: t\n    run: a\n    retries: 0\n", `pipeline[0] "t": retries only applies to http steps`},
+		{"unknown var in container", ecsBase, "pipeline:\n  - uses: citadel/build\n  - name: m\n    task: migrate\n    container: app-${stage}\n", `pipeline[1] "m": unknown variable ${stage}`},
 		{"empty task list", ecsBase, "pipeline:\n  - uses: citadel/build\n  - name: m\n    task: []\n", `set exactly one of uses, run, task, http`},
 	}
 	for _, c := range cases {

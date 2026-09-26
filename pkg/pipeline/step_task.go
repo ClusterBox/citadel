@@ -36,6 +36,10 @@ func (s *taskStep) Run(ctx context.Context, sc *StepContext, w io.Writer) error 
 		}
 		command = append(command, expanded)
 	}
+	container, err := config.ExpandVars(s.container, sc.Vars)
+	if err != nil {
+		return err
+	}
 	shown := strings.Join(command, " ")
 	if s.cmd.Script != "" {
 		shown = command[2]
@@ -49,6 +53,6 @@ func (s *taskStep) Run(ctx context.Context, sc *StepContext, w io.Writer) error 
 		return fmt.Errorf("no image to run: citadel/build did not run for %s", sc.Env)
 	}
 	return sc.ops.runTask(ctx, w, sc.Cfg, sc.Env, sc.ImageURI, aws.TaskSpec{
-		Command: command, Container: s.container, Timeout: s.timeout,
+		Command: command, Container: container, Timeout: s.timeout,
 	})
 }

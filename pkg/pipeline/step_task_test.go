@@ -70,3 +70,14 @@ func TestTaskStep_DryRun(t *testing.T) {
 		t.Fatalf("spec=%+v out=%q", *got, out.String())
 	}
 }
+
+func TestTaskStep_ContainerExpandsVars(t *testing.T) {
+	sc, got := taskCtx(t)
+	s := newTaskStep(config.PipelineStep{Name: "m", Task: config.TaskCommand{Script: "migrate"}, Container: "${name}-${env}"})
+	if err := s.Run(context.Background(), sc, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if got.Container != "demo-dev" {
+		t.Fatalf("container = %q, want demo-dev", got.Container)
+	}
+}
