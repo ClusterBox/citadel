@@ -103,6 +103,128 @@ jobs:
 `main` deploys `prod` and `development` deploys `dev` (override with
 `environment` or `branch-map`). See [action/README.md](action/README.md).
 
+### Pipeline
+
+With no `pipeline:` key, `citadel deploy` runs its built-in sequence
+(`ssm-sync, build, cdk, deploy, config-sync (lambda only), wait`) exactly as
+before. To customize the order, mix in shell commands, run a one-off ECS
+task, or add a health check, declare the deploy as an explicit list of
+steps:
+
+```yaml
+pipeline:
+  - uses: citadel/ssm-sync
+  - name: test
+    run: npm test
+  - uses: citadel/build
+  - name: migrate
+    task: npx prisma migrate deploy
+    timeout: 15m
+  - uses: citadel/cdk
+  - uses: citadel/deploy
+  - uses: citadel/wait
+  - name: smoke
+    http: https://api-${env}.example.com/health
+    rollback_on_failure: true
+```
+
+Each step gets its own log under `.citadel/runs/<id>/` and its own line in
+`run.json`. Validation runs when the config loads (`citadel deploy`,
+`citadel status`, `citadel init`, and the GitHub Action all get it), so a
+bad pipeline is rejected before any AWS call. Every error names the step's
+position and name: `pipeline[<i>] "<name>": <problem>`.
+
+**Step kinds.** Exactly one of `uses`, `run`, `task`, `http` must be set per
+step.
+
+| Field | Applies to | Default | Meaning |
+|---|---|---|---|
+| `uses` | built-in | — | `citadel/ssm-sync`, `citadel/build`, `citadel/cdk`, `citadel/deploy`, `citadel/config-sync`, `citadel/wait` |
+| `run` | shell | — | Command string |
+| `shell` | run | `bash -euo pipefail -c` | Interpreter, given as a list, e.g. `[sh, -c]` |
+| `working_directory` | run | the config's directory | Relative to the config's directory; `${var}`s are expanded |
+| `env` | run | — | `map[string]string`; values get `${var}` substitution |
+| `task` | task | — | A string, run as `sh -c <string>`, or a YAML list passed as the command as-is |
+| `container` | task | the container whose image repository is the service's ECR repository | Which container gets the command override |
+| `http` | http | — | URL |
+| `expect_status` | http | `200` | Must be 100–599 |
+| `retries` | http | `10` | Total attempts |
+| `interval` | http | `6s` | Go duration, between attempts |
+| `request_timeout` | http | `5s` | Go duration, per attempt |
+| `rollback_on_failure` | http | `false` | Only valid on an `http` step placed after `citadel/deploy` |
+| `name` | all | built-ins: the action name (e.g. `ssm-sync`) | Required for `run`/`task`/`http`; must be unique and match `^[a-z0-9][a-z0-9-]*$` (it becomes the step's log file name); may not be a built-in name or `rollback` |
+| `envs` | all | all environments | Only run this step in these environments; others print `⏭️  Skipping <name> (not for <env>)` |
+| `continue_on_error` | all | `false` | The step's failure is recorded but the run continues |
+| `timeout` | run, task | `30m` | Go duration |
+
+**Variables**, expanded in `run`, `env` values, `working_directory`, `task`
+and `http`:
+
+| Variable | Value |
+|---|---|
+| `${env}` | the environment being deployed |
+| `${name}` | the project name |
+| `${image}` | the pushed image URI (empty before `citadel/build` runs) |
+| `${sha}` | the short git SHA |
+| `${region}` | the config's region |
+| `${account}` | the environment's account |
+
+Only a lowercase `${word}` is a citadel variable — an unknown one is a
+config load error. Anything else, such as `${HOME}` or `$PATH`, passes
+through untouched for the shell (or the receiving server, for `http`) to
+resolve.
+
+**Ordering rules**, enforced at load time:
+- `citadel/build` must come before `citadel/cdk`, `citadel/deploy`, and
+  every `task:` step.
+- `citadel/cdk` must come before `citadel/deploy` (when present — it's
+  optional).
+- `citadel/deploy`, `citadel/config-sync` and `citadel/wait` may each
+  appear at most once.
+- `citadel/config-sync` and `citadel/wait` must come after
+  `citadel/deploy`.
+- A pipeline without `citadel/build` or `citadel/deploy` is valid, e.g. one
+  that only runs migrations.
+
+**Built-ins keep their CLI flag gates:** `citadel/ssm-sync` skips with
+`--skip-ssm` or when no `--env-file` is given; `citadel/cdk` runs only with
+`--deploy-infra`; `citadel/config-sync` skips with `--skip-config`;
+`citadel/wait` runs only with `--wait`. `citadel/config-sync` is valid only
+for the `lambda` runtime; `task:` is valid only for the `ecs` runtime.
+
+**Failure handling:**
+- A step with `continue_on_error: true` that fails prints a warning and
+  stays `failed` in `run.json`, but the run keeps going.
+- An `http` step with `rollback_on_failure: true` that fails instead runs
+  an automatic rollback, recorded as its own `rollback` step: ECS rolls
+  the service back to the task-definition revision it ran before this
+  deploy; Lambda rolls the function back to its previous image. The
+  snapshot of "what ran before" is taken right before the first
+  `citadel/cdk` or `citadel/deploy` step that actually runs — but **only**
+  when some step in the pipeline has `rollback_on_failure: true`, so a
+  pipeline without one makes no extra AWS call. If the snapshot could not
+  be taken, the deploy still proceeds; a rollback attempted after that has
+  nothing to restore and fails with "cannot roll back: no snapshot of the
+  previous deployment".
+- Otherwise a step's failure stops the pipeline; the run, the state file
+  and the deploydb row all record it.
+
+**`task:` is ECS-only.** It runs a one-off task in the freshly built
+image, on the service's own network (subnets, security groups, launch
+type), overriding the command on the target container. It needs
+`ecs:RunTask`, `ecs:DescribeTasks`, `ecs:StopTask`, `logs:GetLogEvents`,
+and `iam:PassRole` on the task and execution roles. `rollback_on_failure`
+needs `ecs:UpdateService`/`ecs:DescribeServices` (ECS) or
+`lambda:UpdateFunctionCode`/`lambda:GetFunction` (Lambda) — see
+[action/README.md](action/README.md#required-aws-permissions) for the full
+list.
+
+**`citadel deploy --dry-run`** prints the plan without touching AWS: each
+built-in prints its existing dry-run line, `run:` prints
+`[dry-run] Would run: <cmd>`, `task:` prints
+`[dry-run] Would run task: <cmd>`, and `http:` prints
+`[dry-run] Would check: <url>`. Nothing is recorded in `.citadel/runs/`.
+
 ## citadel-logs daemon
 
 Citadel ships a separate always-on binary, `citadel-logs`, that watches

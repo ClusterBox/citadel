@@ -30,3 +30,18 @@ environments:
 # the function reads them at boot via the CITADEL_SECRETS manifest.
 secrets:
   - DATABASE_URL
+
+# Optional: declare the deploy as explicit steps (default: ssm-sync, build,
+# cdk, deploy, config-sync, wait). Built-ins are `uses: citadel/<name>`;
+# custom steps are run: (shell), task: (one-off ECS task in the new image)
+# and http: (health check). Variables: ${env} ${name} ${image} ${sha}
+# ${region} ${account}.
+# pipeline:
+#   - uses: citadel/ssm-sync
+#   - name: schema
+#     run: npx ts-node scripts/sync-schema.ts
+#   - uses: citadel/build
+#   - uses: citadel/cdk
+#   - uses: citadel/deploy
+#   - uses: citadel/config-sync
+#   - uses: citadel/wait

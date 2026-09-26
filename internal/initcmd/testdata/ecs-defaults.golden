@@ -42,3 +42,19 @@ secrets:
 
 # Optional blocks: queues (SQS access), ecs (adopt an existing
 # cluster/service), vpc, cloudfront. See the citadel README.
+
+# Optional: declare the deploy as explicit steps (default: ssm-sync, build,
+# cdk, deploy, wait). Built-ins are `uses: citadel/<name>`; custom steps are
+# run: (shell), task: (one-off ECS task in the new image) and http: (health
+# check). Variables: ${env} ${name} ${image} ${sha} ${region} ${account}.
+# pipeline:
+#   - uses: citadel/ssm-sync
+#   - uses: citadel/build
+#   - name: migrate
+#     task: npx prisma migrate deploy
+#   - uses: citadel/cdk
+#   - uses: citadel/deploy
+#   - uses: citadel/wait
+#   - name: smoke
+#     http: https://my-api-${env}.example.com/health
+#     rollback_on_failure: true

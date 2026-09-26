@@ -125,6 +125,19 @@ The credentials the job runs with (e.g. from
   `sts:AssumeRole` on the CDK bootstrap roles (`cdk-*-deploy-role-*`,
   `cdk-*-file-publishing-role-*`, `cdk-*-image-publishing-role-*`,
   `cdk-*-lookup-role-*`) of the target account and region.
+- **Pipeline steps** (only if `citadel.yml` declares a `pipeline:` block):
+  `task:` steps need `ecs:RunTask`, `ecs:DescribeTasks`, `ecs:StopTask`,
+  `logs:GetLogEvents`, and `iam:PassRole` on the task and execution roles.
+  An `http:` step with `rollback_on_failure: true` needs whatever the
+  automatic rollback does — `ecs:DescribeServices`/`ecs:UpdateService` for
+  ECS, or `lambda:GetFunction`/`lambda:UpdateFunctionCode` for Lambda.
+
+`run:` steps run as a subprocess of the deploy step and see only the
+workflow's own `env:` (and the `CITADEL_*` variables citadel sets) — never
+the `.env` contents from the `env-file` input. `deploy.sh` unsets the
+variable holding that content before invoking `citadel deploy`, so a
+`run:` step that needs a secret must get it from the job or step's own
+`env:`, not from the synced `.env` file.
 
 ## Versions
 
