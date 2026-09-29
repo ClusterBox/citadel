@@ -40,8 +40,9 @@ secrets:
 # env:
 #   LOG_LEVEL: info
 
-# Optional blocks: queues (SQS access), ecs (adopt an existing
-# cluster/service), vpc, cloudfront. See the citadel README.
+# Optional blocks: queues (SQS access), iam (runtime SSM reads), cache
+# (ElastiCache Serverless Valkey), ecs (adopt an existing cluster/service),
+# vpc, cloudfront. See the citadel README.
 
 # Optional: declare the deploy as explicit steps (default: ssm-sync, build,
 # cdk, deploy, wait). Built-ins are `uses: citadel/<name>`; custom steps are

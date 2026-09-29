@@ -33,6 +33,8 @@ type DeployConfig struct {
 	ECS          *ECSConfig           `yaml:"ecs,omitempty"`
 	VPC          *VPCConfig           `yaml:"vpc,omitempty"`
 	CloudFront   *CloudFrontConfig    `yaml:"cloudfront,omitempty"`
+	IAM          *IAMConfig           `yaml:"iam,omitempty"`
+	Cache        *CacheConfig         `yaml:"cache,omitempty"`
 	Pipeline     PipelineSteps        `yaml:"pipeline,omitempty"`
 }
 
@@ -80,10 +82,25 @@ type ECSConfig struct {
 
 // QueuesConfig declares the SQS queues a service may access, split by intent.
 // Consume queues receive read/delete permissions; produce queues receive send
-// permissions. A queue ARN may appear in both lists.
+// permissions. A queue ARN may appear in both lists. An ARN may contain {env},
+// so each environment is granted only its own queue.
 type QueuesConfig struct {
 	Consume []string `yaml:"consume,omitempty"`
 	Produce []string `yaml:"produce,omitempty"`
+}
+
+// ConsumeARNs returns queues.consume for env with {env} expanded.
+func (q *QueuesConfig) ConsumeARNs(env string) []string { return expandAll(q.Consume, env) }
+
+// ProduceARNs returns queues.produce for env with {env} expanded.
+func (q *QueuesConfig) ProduceARNs(env string) []string { return expandAll(q.Produce, env) }
+
+func expandAll(values []string, env string) []string {
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		out = append(out, ExpandEnv(v, env))
+	}
+	return out
 }
 
 // ContainerConfig defines container runtime settings
@@ -181,6 +198,12 @@ func (c *DeployConfig) Validate() error {
 	if err := c.validateQueues(); err != nil {
 		return err
 	}
+	if err := c.validateIAM(); err != nil {
+		return err
+	}
+	if err := c.validateCache(); err != nil {
+		return err
+	}
 	if err := c.validatePipeline(); err != nil {
 		return err
 	}
@@ -194,14 +217,30 @@ func (c *DeployConfig) validateQueues() error {
 		return nil
 	}
 	for i, arn := range c.Queues.Consume {
-		if !isValidSQSARN(arn) {
-			return fmt.Errorf("queues.consume[%d]: %q is not a valid SQS ARN", i, arn)
+		if err := checkQueueARN(arn); err != nil {
+			return fmt.Errorf("queues.consume[%d]: %q %w", i, arn, err)
 		}
 	}
 	for i, arn := range c.Queues.Produce {
-		if !isValidSQSARN(arn) {
-			return fmt.Errorf("queues.produce[%d]: %q is not a valid SQS ARN", i, arn)
+		if err := checkQueueARN(arn); err != nil {
+			return fmt.Errorf("queues.produce[%d]: %q %w", i, arn, err)
 		}
+	}
+	return nil
+}
+
+// checkQueueARN validates one queues: entry. {env} may appear only in the
+// queue-name segment: anywhere else it would grant a queue that cannot exist.
+func checkQueueARN(arn string) error {
+	if !isValidSQSARN(arn) {
+		return fmt.Errorf("is not a valid SQS ARN")
+	}
+	if hasUnknownPlaceholder(arn) {
+		return fmt.Errorf("has a placeholder other than {env}")
+	}
+	parts := strings.Split(arn, ":")
+	if strings.Contains(strings.Join(parts[:5], ":"), envPlaceholder) {
+		return fmt.Errorf("uses {env} outside the queue name; {env} is only allowed in the queue name")
 	}
 	return nil
 }
