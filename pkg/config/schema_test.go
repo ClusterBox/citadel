@@ -282,3 +282,19 @@ func TestValidate_QueueARNRejectsUnknownPlaceholder(t *testing.T) {
 		t.Fatalf("err = %v, want a placeholder error", err)
 	}
 }
+
+// {env} expands anywhere in the string, but only the queue name differs per
+// environment: in the region or account it would grant a queue that cannot
+// exist and fail only at runtime with AccessDenied.
+func TestValidate_QueueARNEnvOnlyInQueueName(t *testing.T) {
+	for _, arn := range []string{
+		"arn:aws:sqs:{env}:111111111111:settle",
+		"arn:aws:sqs:us-east-1:{env}:settle",
+	} {
+		cfg := baseValidConfig()
+		cfg.Queues = &QueuesConfig{Consume: []string{arn}}
+		if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "{env} is only allowed in the queue name") {
+			t.Errorf("%s: err = %v, want a queue-name-only error", arn, err)
+		}
+	}
+}

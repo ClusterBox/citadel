@@ -11,8 +11,13 @@ import (
 	"github.com/aws/jsii-runtime-go"
 )
 
-// cachePort is the ElastiCache Serverless primary endpoint's port.
-const cachePort = 6379
+// ElastiCache Serverless serves the primary endpoint on cachePort and the
+// reader endpoint on cacheReaderPort. AWS requires both open to clients: some
+// dial both on every new connection even without read-from-replica.
+const (
+	cachePort       = 6379
+	cacheReaderPort = 6380
+)
 
 // serverlessCache is what the cache: block adds to the stack.
 type serverlessCache struct {
@@ -51,7 +56,9 @@ func buildCache(stack awscdk.Stack, cfg *config.DeployConfig, vpc awsec2.Vpc, en
 	}
 }
 
-// allowFrom opens the cache's port to the service's tasks, and only to them.
+// allowFrom opens the cache's ports to the service's tasks, and only to them.
 func (c *serverlessCache) allowFrom(service awsecs.FargateService) {
-	c.securityGroup.Connections().AllowFrom(service, awsec2.Port_Tcp(jsii.Number(cachePort)), jsii.String("Valkey from the service's tasks"))
+	c.securityGroup.Connections().AllowFrom(service,
+		awsec2.Port_TcpRange(jsii.Number(cachePort), jsii.Number(cacheReaderPort)),
+		jsii.String("Valkey (primary and reader endpoints) from the service's tasks"))
 }

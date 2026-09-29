@@ -329,9 +329,9 @@ queues:
 
 A queue ARN may appear in both lists if the service both reads and writes it.
 
-An ARN may contain `{env}` (for example `…:settle-{env}`), which becomes the
-environment being deployed, so dev is never granted prod's queue. Any other
-`{...}` is rejected. Quote such values in a YAML flow list.
+An ARN may contain `{env}` in its queue name (for example `…:settle-{env}`),
+which becomes the environment being deployed, so dev is never granted prod's
+queue. `{env}` elsewhere in the ARN, and any other `{...}`, is rejected. Quote such values in a YAML flow list.
 
 Citadel does not create the queues — they must already exist.
 
@@ -364,11 +364,18 @@ cache:
 
 Creates an ElastiCache Serverless cache named `<name>-<env>` in the same
 subnets as the tasks (public in dev, private in other environments), behind a
-security group that admits only the service's tasks on 6379. The endpoint
+security group that admits only the service's tasks on 6379 (primary
+endpoint) and 6380 (reader endpoint). The endpoint
 (`host:port`) is injected as the plain env var `VALKEY_ENDPOINT`, so do not
 also list it under `secrets:` or `env:`. Serverless caches require TLS. Only
 `engine: valkey` with `serverless: true` is supported, on the `ecs` runtime.
 The stack also outputs `CacheEndpoint`.
+
+The cache is ephemeral: it and its data are deleted with the stack or when the
+`cache:` block is removed, with no final snapshot. Because its name is fixed,
+changes that make CloudFormation replace it (for example raising
+`vpc.max_azs`, which changes its subnets) fail the deploy and roll back; to
+apply one, remove the `cache:` block, deploy, then add it back.
 
 ## Releasing
 

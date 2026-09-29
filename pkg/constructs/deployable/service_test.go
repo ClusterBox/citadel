@@ -118,7 +118,9 @@ func TestCacheInjectsEndpointAsPlainEnvVar(t *testing.T) {
 	})
 }
 
-func TestCacheAdmitsOnlyTheServiceOn6379(t *testing.T) {
+// ElastiCache Serverless serves the primary endpoint on 6379 and the reader
+// endpoint on 6380; AWS requires both open because some clients dial both.
+func TestCacheAdmitsOnlyTheServiceOnItsPorts(t *testing.T) {
 	tpl := synth(t, cacheYAML, "dev")
 	tpl.ResourcePropertiesCountIs(jsii.String("AWS::EC2::SecurityGroupIngress"), &map[string]any{
 		"GroupId": map[string]any{"Fn::GetAtt": []any{assertions.Match_StringLikeRegexp(jsii.String("^CacheSecurityGroup")), "GroupId"}},
@@ -126,7 +128,7 @@ func TestCacheAdmitsOnlyTheServiceOn6379(t *testing.T) {
 	tpl.HasResourceProperties(jsii.String("AWS::EC2::SecurityGroupIngress"), map[string]any{
 		"IpProtocol":            "tcp",
 		"FromPort":              6379,
-		"ToPort":                6379,
+		"ToPort":                6380,
 		"GroupId":               map[string]any{"Fn::GetAtt": []any{assertions.Match_StringLikeRegexp(jsii.String("^CacheSecurityGroup")), "GroupId"}},
 		"SourceSecurityGroupId": map[string]any{"Fn::GetAtt": []any{assertions.Match_StringLikeRegexp(jsii.String("^ServiceSecurityGroup")), "GroupId"}},
 	})

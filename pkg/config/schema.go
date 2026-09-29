@@ -217,20 +217,30 @@ func (c *DeployConfig) validateQueues() error {
 		return nil
 	}
 	for i, arn := range c.Queues.Consume {
-		if !isValidSQSARN(arn) {
-			return fmt.Errorf("queues.consume[%d]: %q is not a valid SQS ARN", i, arn)
-		}
-		if hasUnknownPlaceholder(arn) {
-			return fmt.Errorf("queues.consume[%d]: %q has a placeholder other than {env}", i, arn)
+		if err := checkQueueARN(arn); err != nil {
+			return fmt.Errorf("queues.consume[%d]: %q %w", i, arn, err)
 		}
 	}
 	for i, arn := range c.Queues.Produce {
-		if !isValidSQSARN(arn) {
-			return fmt.Errorf("queues.produce[%d]: %q is not a valid SQS ARN", i, arn)
+		if err := checkQueueARN(arn); err != nil {
+			return fmt.Errorf("queues.produce[%d]: %q %w", i, arn, err)
 		}
-		if hasUnknownPlaceholder(arn) {
-			return fmt.Errorf("queues.produce[%d]: %q has a placeholder other than {env}", i, arn)
-		}
+	}
+	return nil
+}
+
+// checkQueueARN validates one queues: entry. {env} may appear only in the
+// queue-name segment: anywhere else it would grant a queue that cannot exist.
+func checkQueueARN(arn string) error {
+	if !isValidSQSARN(arn) {
+		return fmt.Errorf("is not a valid SQS ARN")
+	}
+	if hasUnknownPlaceholder(arn) {
+		return fmt.Errorf("has a placeholder other than {env}")
+	}
+	parts := strings.Split(arn, ":")
+	if strings.Contains(strings.Join(parts[:5], ":"), envPlaceholder) {
+		return fmt.Errorf("uses {env} outside the queue name; {env} is only allowed in the queue name")
 	}
 	return nil
 }
