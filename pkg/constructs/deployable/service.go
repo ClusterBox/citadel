@@ -175,6 +175,14 @@ func buildIAMRoles(stack awscdk.Stack, cfg *config.DeployConfig, env string) (aw
 		AssumedBy: awsiam.NewServicePrincipal(jsii.String("ecs-tasks.amazonaws.com"), nil),
 	})
 
+	// Grant runtime reads of the declared SSM prefixes (iam.ssm_read).
+	if resources := cfg.SSMReadResources(env); len(resources) > 0 {
+		taskRole.AddToPolicy(awsiam.NewPolicyStatement(&awsiam.PolicyStatementProps{
+			Actions:   jsii.Strings("ssm:GetParameter", "ssm:GetParameters"),
+			Resources: arnPointers(resources),
+		}))
+	}
+
 	// Grant scoped SQS access to declared queues.
 	if cfg.Queues != nil {
 		if len(cfg.Queues.Consume) > 0 {

@@ -330,6 +330,25 @@ queues:
 A queue ARN may appear in both lists if the service both reads and writes it.
 Citadel does not create the queues — they must already exist.
 
+### `iam:` — runtime SSM reads (optional)
+
+Lets the application read SSM parameters at runtime, beyond the boot secrets
+under `/<name>-<env>/` (which the execution role already injects):
+
+```yaml
+iam:
+  ssm_read:
+    - /smaug/{env}/psp
+```
+
+Each prefix grants the **task role** `ssm:GetParameter` and
+`ssm:GetParameters` on every parameter under it
+(`arn:aws:ssm:*:*:parameter/smaug/<env>/psp/*`). `{env}` becomes the
+environment being deployed; any other `{...}` is rejected. Prefixes must start
+with `/`, may not be `/` alone, and may not contain wildcards. In a YAML flow
+list, quote values that contain `{env}` (`ssm_read: ["/smaug/{env}/psp"]`).
+Parameters encrypted with the default `aws/ssm` key need no KMS grant.
+
 ## Releasing
 
 Push a tag `vX.Y.Z` on `main`. `.github/workflows/release.yml` runs the tests and
