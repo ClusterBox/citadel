@@ -64,11 +64,17 @@ func NewDeployableService(scope constructs.Construct, id string, props *Deployab
 	// Build task definition
 	taskDef := buildTaskDefinition(stack, cfg, envCfg, executionRole, taskRole)
 
+	// Build the ElastiCache Serverless cache (if declared)
+	cache := buildCache(stack, cfg, vpc, props.Environment)
+
 	// Add container with auto-generated secrets
-	buildContainer(stack, cfg, envCfg, taskDef, repo, logGroup, props.Environment)
+	buildContainer(stack, cfg, envCfg, taskDef, repo, logGroup, cache, props.Environment)
 
 	// Build Fargate service
 	service := buildFargateService(stack, cfg, envCfg, cluster, taskDef, vpc, props.Environment)
+	if cache != nil {
+		cache.allowFrom(service.Service())
+	}
 
 	// Configure health check
 	configureHealthCheck(service, cfg)
@@ -80,7 +86,7 @@ func NewDeployableService(scope constructs.Construct, id string, props *Deployab
 	}
 
 	// Outputs
-	buildOutputs(stack, cfg, service, repo, distribution)
+	buildOutputs(stack, cfg, service, repo, distribution, cache)
 
 	return stack
 }
@@ -244,7 +250,7 @@ func buildTaskDefinition(stack awscdk.Stack, cfg *config.DeployConfig, envCfg *c
 }
 
 // buildContainer adds the container to the task definition with auto-generated secrets
-func buildContainer(stack awscdk.Stack, cfg *config.DeployConfig, envCfg *config.EnvConfig, taskDef awsecs.FargateTaskDefinition, repo awsecr.IRepository, logGroup awslogs.LogGroup, env string) awsecs.ContainerDefinition {
+func buildContainer(stack awscdk.Stack, cfg *config.DeployConfig, envCfg *config.EnvConfig, taskDef awsecs.FargateTaskDefinition, repo awsecr.IRepository, logGroup awslogs.LogGroup, cache *serverlessCache, env string) awsecs.ContainerDefinition {
 	// AUTO-GENERATE SECRETS MAP from citadel.yml - THIS IS THE KEY FEATURE!
 	secrets := make(map[string]awsecs.Secret)
 	for _, secretName := range cfg.Secrets {
@@ -263,6 +269,9 @@ func buildContainer(stack awscdk.Stack, cfg *config.DeployConfig, envCfg *config
 	environment["PORT"] = jsii.String(fmt.Sprintf("%d", cfg.Container.Port))
 	environment["SERVICE_NAME"] = jsii.String(cfg.Name)
 	environment["ENVIRONMENT"] = jsii.String(env)
+	if cache != nil {
+		environment[config.CacheEndpointEnvVar] = cache.endpoint
+	}
 
 	// Resolve the image tag from the "imageTag" CDK context. Deploys pass the
 	// git SHA so each deploy registers an immutable, rollback-able task def
@@ -325,16 +334,10 @@ func buildFargateService(stack awscdk.Stack, cfg *config.DeployConfig, envCfg *c
 		}
 	}
 
-	// Subnet selection
-	var subnetType awsec2.SubnetType
-	var assignPublicIP bool
-	if env == "dev" {
-		subnetType = awsec2.SubnetType_PUBLIC
-		assignPublicIP = true
-	} else {
-		subnetType = awsec2.SubnetType_PRIVATE_WITH_EGRESS
-		assignPublicIP = false
-	}
+	// Subnet selection: dev tasks need a public IP to reach the internet
+	// without a NAT gateway.
+	subnetType := taskSubnetType(env)
+	assignPublicIP := env == "dev"
 
 	return awsecspatterns.NewApplicationLoadBalancedFargateService(stack, jsii.String("Service"), &awsecspatterns.ApplicationLoadBalancedFargateServiceProps{
 		Cluster:                    cluster,
@@ -354,6 +357,15 @@ func buildFargateService(stack awscdk.Stack, cfg *config.DeployConfig, envCfg *c
 		MinHealthyPercent: jsii.Number(100),
 		MaxHealthyPercent: jsii.Number(200),
 	})
+}
+
+// taskSubnetType is where the service's tasks (and its cache) run: public
+// subnets in dev (no NAT gateway), private subnets with egress elsewhere.
+func taskSubnetType(env string) awsec2.SubnetType {
+	if env == "dev" {
+		return awsec2.SubnetType_PUBLIC
+	}
+	return awsec2.SubnetType_PRIVATE_WITH_EGRESS
 }
 
 // configureHealthCheck configures the ALB target group health check
@@ -392,7 +404,7 @@ func buildCloudFront(stack awscdk.Stack, cfg *config.DeployConfig, service awsec
 }
 
 // buildOutputs creates CloudFormation outputs
-func buildOutputs(stack awscdk.Stack, cfg *config.DeployConfig, service awsecspatterns.ApplicationLoadBalancedFargateService, repo awsecr.IRepository, distribution awscloudfront.Distribution) {
+func buildOutputs(stack awscdk.Stack, cfg *config.DeployConfig, service awsecspatterns.ApplicationLoadBalancedFargateService, repo awsecr.IRepository, distribution awscloudfront.Distribution, cache *serverlessCache) {
 	awscdk.NewCfnOutput(stack, jsii.String("LoadBalancerDNS"), &awscdk.CfnOutputProps{
 		Value:       service.LoadBalancer().LoadBalancerDnsName(),
 		Description: jsii.String("Application Load Balancer DNS"),
@@ -412,6 +424,13 @@ func buildOutputs(stack awscdk.Stack, cfg *config.DeployConfig, service awsecspa
 		awscdk.NewCfnOutput(stack, jsii.String("CloudFrontURL"), &awscdk.CfnOutputProps{
 			Value:       jsii.String(fmt.Sprintf("https://%s", *distribution.DistributionDomainName())),
 			Description: jsii.String("CloudFront HTTPS URL"),
+		})
+	}
+
+	if cache != nil {
+		awscdk.NewCfnOutput(stack, jsii.String("CacheEndpoint"), &awscdk.CfnOutputProps{
+			Value:       cache.endpoint,
+			Description: jsii.String("ElastiCache Serverless endpoint (host:port, TLS required)"),
 		})
 	}
 }

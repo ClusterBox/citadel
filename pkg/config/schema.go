@@ -34,6 +34,7 @@ type DeployConfig struct {
 	VPC          *VPCConfig           `yaml:"vpc,omitempty"`
 	CloudFront   *CloudFrontConfig    `yaml:"cloudfront,omitempty"`
 	IAM          *IAMConfig           `yaml:"iam,omitempty"`
+	Cache        *CacheConfig         `yaml:"cache,omitempty"`
 	Pipeline     PipelineSteps        `yaml:"pipeline,omitempty"`
 }
 
@@ -183,6 +184,9 @@ func (c *DeployConfig) Validate() error {
 		return err
 	}
 	if err := c.validateIAM(); err != nil {
+		return err
+	}
+	if err := c.validateCache(); err != nil {
 		return err
 	}
 	if err := c.validatePipeline(); err != nil {

@@ -74,3 +74,88 @@ func TestNoIAMBlockAddsNoSSMGrantToTaskRole(t *testing.T) {
 		}),
 	}, jsii.Number(0))
 }
+
+const cacheYAML = baseYAML + `
+cache:
+  engine: valkey
+  serverless: true
+`
+
+func TestCacheCreatesServerlessValkeyInTaskSubnets(t *testing.T) {
+	for env, subnet := range map[string]string{"dev": "^VpcPublicSubnet", "prod": "^VpcPrivateSubnet"} {
+		tpl := synth(t, cacheYAML, env)
+		tpl.ResourceCountIs(jsii.String("AWS::ElastiCache::ServerlessCache"), jsii.Number(1))
+		tpl.HasResourceProperties(jsii.String("AWS::ElastiCache::ServerlessCache"), map[string]any{
+			"Engine":              "valkey",
+			"ServerlessCacheName": "demo-" + env,
+			"SubnetIds": []any{
+				map[string]any{"Ref": assertions.Match_StringLikeRegexp(jsii.String(subnet))},
+				map[string]any{"Ref": assertions.Match_StringLikeRegexp(jsii.String(subnet))},
+			},
+			"SecurityGroupIds": []any{
+				map[string]any{"Fn::GetAtt": []any{assertions.Match_StringLikeRegexp(jsii.String("^CacheSecurityGroup")), "GroupId"}},
+			},
+		})
+	}
+}
+
+func TestCacheInjectsEndpointAsPlainEnvVar(t *testing.T) {
+	tpl := synth(t, cacheYAML, "dev")
+	tpl.HasResourceProperties(jsii.String("AWS::ECS::TaskDefinition"), map[string]any{
+		"ContainerDefinitions": assertions.Match_ArrayWith(&[]any{
+			assertions.Match_ObjectLike(&map[string]any{
+				"Environment": assertions.Match_ArrayWith(&[]any{
+					map[string]any{
+						"Name": "VALKEY_ENDPOINT",
+						"Value": map[string]any{"Fn::Join": []any{":", []any{
+							map[string]any{"Fn::GetAtt": []any{"Cache", "Endpoint.Address"}},
+							map[string]any{"Fn::GetAtt": []any{"Cache", "Endpoint.Port"}},
+						}}},
+					},
+				}),
+			}),
+		}),
+	})
+}
+
+func TestCacheAdmitsOnlyTheServiceOn6379(t *testing.T) {
+	tpl := synth(t, cacheYAML, "dev")
+	tpl.ResourcePropertiesCountIs(jsii.String("AWS::EC2::SecurityGroupIngress"), &map[string]any{
+		"GroupId": map[string]any{"Fn::GetAtt": []any{assertions.Match_StringLikeRegexp(jsii.String("^CacheSecurityGroup")), "GroupId"}},
+	}, jsii.Number(1))
+	tpl.HasResourceProperties(jsii.String("AWS::EC2::SecurityGroupIngress"), map[string]any{
+		"IpProtocol":            "tcp",
+		"FromPort":              6379,
+		"ToPort":                6379,
+		"GroupId":               map[string]any{"Fn::GetAtt": []any{assertions.Match_StringLikeRegexp(jsii.String("^CacheSecurityGroup")), "GroupId"}},
+		"SourceSecurityGroupId": map[string]any{"Fn::GetAtt": []any{assertions.Match_StringLikeRegexp(jsii.String("^ServiceSecurityGroup")), "GroupId"}},
+	})
+	tpl.HasOutput(jsii.String("CacheEndpoint"), map[string]any{})
+}
+
+func TestNoCacheBlockCreatesNoCache(t *testing.T) {
+	tpl := synth(t, baseYAML, "dev")
+	tpl.ResourceCountIs(jsii.String("AWS::ElastiCache::ServerlessCache"), jsii.Number(0))
+	tpl.HasResourceProperties(jsii.String("AWS::ECS::TaskDefinition"), map[string]any{
+		"ContainerDefinitions": assertions.Match_ArrayWith(&[]any{
+			assertions.Match_ObjectLike(&map[string]any{
+				"Environment": assertions.Match_Not(assertions.Match_ArrayWith(&[]any{
+					assertions.Match_ObjectLike(&map[string]any{"Name": "VALKEY_ENDPOINT"}),
+				})),
+			}),
+		}),
+	})
+}
+
+// The subnet selection moved into taskSubnetType; the service itself must not
+// change: dev tasks keep a public IP, prod tasks stay private.
+func TestServiceNetworkingUnchanged(t *testing.T) {
+	for env, ip := range map[string]string{"dev": "ENABLED", "prod": "DISABLED"} {
+		tpl := synth(t, baseYAML, env)
+		tpl.HasResourceProperties(jsii.String("AWS::ECS::Service"), map[string]any{
+			"NetworkConfiguration": map[string]any{
+				"AwsvpcConfiguration": assertions.Match_ObjectLike(&map[string]any{"AssignPublicIp": ip}),
+			},
+		})
+	}
+}

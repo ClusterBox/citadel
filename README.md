@@ -349,6 +349,22 @@ with `/`, may not be `/` alone, and may not contain wildcards. In a YAML flow
 list, quote values that contain `{env}` (`ssm_read: ["/smaug/{env}/psp"]`).
 Parameters encrypted with the default `aws/ssm` key need no KMS grant.
 
+### `cache:` — ElastiCache Serverless Valkey (optional)
+
+```yaml
+cache:
+  engine: valkey
+  serverless: true
+```
+
+Creates an ElastiCache Serverless cache named `<name>-<env>` in the same
+subnets as the tasks (public in dev, private in other environments), behind a
+security group that admits only the service's tasks on 6379. The endpoint
+(`host:port`) is injected as the plain env var `VALKEY_ENDPOINT`, so do not
+also list it under `secrets:` or `env:`. Serverless caches require TLS. Only
+`engine: valkey` with `serverless: true` is supported, on the `ecs` runtime.
+The stack also outputs `CacheEndpoint`.
+
 ## Releasing
 
 Push a tag `vX.Y.Z` on `main`. `.github/workflows/release.yml` runs the tests and
