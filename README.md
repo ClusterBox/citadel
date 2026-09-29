@@ -328,6 +328,11 @@ queues:
 - `produce` queues are granted `sqs:SendMessage` and `sqs:GetQueueAttributes`.
 
 A queue ARN may appear in both lists if the service both reads and writes it.
+
+An ARN may contain `{env}` (for example `…:settle-{env}`), which becomes the
+environment being deployed, so dev is never granted prod's queue. Any other
+`{...}` is rejected. Quote such values in a YAML flow list.
+
 Citadel does not create the queues — they must already exist.
 
 ### `iam:` — runtime SSM reads (optional)

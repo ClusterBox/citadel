@@ -82,10 +82,25 @@ type ECSConfig struct {
 
 // QueuesConfig declares the SQS queues a service may access, split by intent.
 // Consume queues receive read/delete permissions; produce queues receive send
-// permissions. A queue ARN may appear in both lists.
+// permissions. A queue ARN may appear in both lists. An ARN may contain {env},
+// so each environment is granted only its own queue.
 type QueuesConfig struct {
 	Consume []string `yaml:"consume,omitempty"`
 	Produce []string `yaml:"produce,omitempty"`
+}
+
+// ConsumeARNs returns queues.consume for env with {env} expanded.
+func (q *QueuesConfig) ConsumeARNs(env string) []string { return expandAll(q.Consume, env) }
+
+// ProduceARNs returns queues.produce for env with {env} expanded.
+func (q *QueuesConfig) ProduceARNs(env string) []string { return expandAll(q.Produce, env) }
+
+func expandAll(values []string, env string) []string {
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		out = append(out, ExpandEnv(v, env))
+	}
+	return out
 }
 
 // ContainerConfig defines container runtime settings
@@ -205,10 +220,16 @@ func (c *DeployConfig) validateQueues() error {
 		if !isValidSQSARN(arn) {
 			return fmt.Errorf("queues.consume[%d]: %q is not a valid SQS ARN", i, arn)
 		}
+		if hasUnknownPlaceholder(arn) {
+			return fmt.Errorf("queues.consume[%d]: %q has a placeholder other than {env}", i, arn)
+		}
 	}
 	for i, arn := range c.Queues.Produce {
 		if !isValidSQSARN(arn) {
 			return fmt.Errorf("queues.produce[%d]: %q is not a valid SQS ARN", i, arn)
+		}
+		if hasUnknownPlaceholder(arn) {
+			return fmt.Errorf("queues.produce[%d]: %q has a placeholder other than {env}", i, arn)
 		}
 	}
 	return nil

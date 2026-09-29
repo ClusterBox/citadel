@@ -255,3 +255,30 @@ secrets:
 		t.Fatalf("env not parsed: got %q", got)
 	}
 }
+
+func TestQueueARNsExpandEnv(t *testing.T) {
+	cfg := baseValidConfig()
+	cfg.Queues = &QueuesConfig{
+		Consume: []string{"arn:aws:sqs:us-east-1:111111111111:jobs-{env}"},
+		Produce: []string{"arn:aws:sqs:us-east-1:111111111111:settle-{env}", "arn:aws:sqs:us-east-1:111111111111:shared"},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("{env} in a queue name must validate: %v", err)
+	}
+	if got := cfg.Queues.ConsumeARNs("prod"); len(got) != 1 || got[0] != "arn:aws:sqs:us-east-1:111111111111:jobs-prod" {
+		t.Errorf("ConsumeARNs = %v", got)
+	}
+	got := cfg.Queues.ProduceARNs("dev")
+	want := []string{"arn:aws:sqs:us-east-1:111111111111:settle-dev", "arn:aws:sqs:us-east-1:111111111111:shared"}
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("ProduceARNs = %v, want %v", got, want)
+	}
+}
+
+func TestValidate_QueueARNRejectsUnknownPlaceholder(t *testing.T) {
+	cfg := baseValidConfig()
+	cfg.Queues = &QueuesConfig{Produce: []string{"arn:aws:sqs:us-east-1:111111111111:settle-{stage}"}}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "placeholder other than {env}") {
+		t.Fatalf("err = %v, want a placeholder error", err)
+	}
+}

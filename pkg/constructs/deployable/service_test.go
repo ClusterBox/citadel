@@ -159,3 +159,15 @@ func TestServiceNetworkingUnchanged(t *testing.T) {
 		})
 	}
 }
+
+func TestQueueARNsAreScopedToTheEnvironment(t *testing.T) {
+	tpl := synth(t, baseYAML+`
+queues:
+  produce:
+    - arn:aws:sqs:us-east-1:111111111111:settle-{env}
+`, "dev")
+	tpl.HasResourceProperties(jsii.String("AWS::IAM::Policy"), taskRolePolicy(
+		[]any{"sqs:SendMessage", "sqs:GetQueueAttributes"},
+		"arn:aws:sqs:us-east-1:111111111111:settle-dev",
+	))
+}

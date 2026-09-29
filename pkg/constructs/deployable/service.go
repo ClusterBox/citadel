@@ -199,7 +199,7 @@ func buildIAMRoles(stack awscdk.Stack, cfg *config.DeployConfig, env string) (aw
 					"sqs:GetQueueAttributes",
 					"sqs:ChangeMessageVisibility",
 				),
-				Resources: arnPointers(cfg.Queues.Consume),
+				Resources: arnPointers(cfg.Queues.ConsumeARNs(env)),
 			}))
 		}
 		if len(cfg.Queues.Produce) > 0 {
@@ -208,7 +208,7 @@ func buildIAMRoles(stack awscdk.Stack, cfg *config.DeployConfig, env string) (aw
 					"sqs:SendMessage",
 					"sqs:GetQueueAttributes",
 				),
-				Resources: arnPointers(cfg.Queues.Produce),
+				Resources: arnPointers(cfg.Queues.ProduceARNs(env)),
 			}))
 		}
 	}
