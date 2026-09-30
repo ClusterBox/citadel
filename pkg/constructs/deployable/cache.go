@@ -35,7 +35,7 @@ func buildCache(stack awscdk.Stack, cfg *config.DeployConfig, vpc awsec2.Vpc, en
 	name := cfg.CacheName(env)
 	sg := awsec2.NewSecurityGroup(stack, jsii.String("CacheSecurityGroup"), &awsec2.SecurityGroupProps{
 		Vpc:              vpc,
-		Description:      jsii.String(fmt.Sprintf("%s cache: reachable only from the service's tasks", name)),
+		Description:      jsii.String(fmt.Sprintf("%s cache: reachable only from the service tasks", name)),
 		AllowAllOutbound: jsii.Bool(false),
 	})
 	subnets := vpc.SelectSubnets(&awsec2.SubnetSelection{SubnetType: taskSubnetType(env)}).SubnetIds
@@ -60,5 +60,5 @@ func buildCache(stack awscdk.Stack, cfg *config.DeployConfig, vpc awsec2.Vpc, en
 func (c *serverlessCache) allowFrom(service awsecs.FargateService) {
 	c.securityGroup.Connections().AllowFrom(service,
 		awsec2.Port_TcpRange(jsii.Number(cachePort), jsii.Number(cacheReaderPort)),
-		jsii.String("Valkey (primary and reader endpoints) from the service's tasks"))
+		jsii.String("Valkey (primary and reader endpoints) from the service tasks"))
 }

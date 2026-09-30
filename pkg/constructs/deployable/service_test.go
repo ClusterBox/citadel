@@ -1,8 +1,10 @@
 package deployable
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
 
 	"github.com/aws/aws-cdk-go/awscdk/v2"
@@ -172,4 +174,46 @@ queues:
 		[]any{"sqs:SendMessage", "sqs:GetQueueAttributes"},
 		"arn:aws:sqs:us-east-1:111111111111:settle-dev",
 	))
+}
+
+// EC2 rejects a security group or rule description outside this set, and
+// CloudFormation only finds out at deploy time, failing (and rolling back)
+// the whole stack. An apostrophe ("the service's tasks") did exactly that.
+var ec2Description = regexp.MustCompile(`^[a-zA-Z0-9. _\-:/()#,@\[\]+=&;{}!$*]{0,255}$`)
+
+func TestSecurityGroupDescriptionsAreValidForEC2(t *testing.T) {
+	for _, env := range []string{"dev", "prod"} {
+		tpl := synth(t, cacheYAML+"\ncloudfront: {enabled: true}\n", env)
+		resources := (*tpl.ToJSON())["Resources"].(map[string]any)
+		checked := 0
+		check := func(where string, v any) {
+			s, ok := v.(string)
+			if !ok {
+				return // an intrinsic (Fn::Join etc.); resolved by CloudFormation
+			}
+			checked++
+			if !ec2Description.MatchString(s) {
+				t.Errorf("%s %s: description %q has characters EC2 rejects", env, where, s)
+			}
+		}
+		for id, r := range resources {
+			res := r.(map[string]any)
+			props, _ := res["Properties"].(map[string]any)
+			switch res["Type"] {
+			case "AWS::EC2::SecurityGroup":
+				check(id+".GroupDescription", props["GroupDescription"])
+				for _, key := range []string{"SecurityGroupIngress", "SecurityGroupEgress"} {
+					rules, _ := props[key].([]any)
+					for i, rule := range rules {
+						check(fmt.Sprintf("%s.%s[%d]", id, key, i), rule.(map[string]any)["Description"])
+					}
+				}
+			case "AWS::EC2::SecurityGroupIngress", "AWS::EC2::SecurityGroupEgress":
+				check(id+".Description", props["Description"])
+			}
+		}
+		if checked == 0 {
+			t.Fatalf("%s: no descriptions found; the walk is broken", env)
+		}
+	}
 }

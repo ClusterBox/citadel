@@ -47,10 +47,9 @@ func (c *Client) Build(ctx context.Context, w io.Writer, cfg *config.DeployConfi
 	}
 	defer resp.Body.Close()
 
-	// Stream build output
-	_, err = io.Copy(w, resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read build output: %w", err)
+	// Stream build output; a failed build still answers 200.
+	if err := copyDaemonStream(w, resp.Body); err != nil {
+		return nil, fmt.Errorf("failed to build image: %w", err)
 	}
 
 	return &BuildResult{
@@ -196,10 +195,10 @@ func (c *Client) Push(ctx context.Context, w io.Writer, ecrClient *ecr.Client, i
 	}
 	defer resp.Close()
 
-	// Stream push output
-	_, err = io.Copy(w, resp)
-	if err != nil {
-		return fmt.Errorf("failed to read push output: %w", err)
+	// Stream push output; a rejected push (e.g. no such repository) still
+	// answers 200.
+	if err := copyDaemonStream(w, resp); err != nil {
+		return fmt.Errorf("failed to push image: %w", err)
 	}
 
 	return nil
