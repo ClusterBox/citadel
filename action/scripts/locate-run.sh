@@ -4,9 +4,10 @@ set -euo pipefail
 # shellcheck source=lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-citadel_dir="${CITADEL_WORKING_DIRECTORY:-.}/$(dirname "${CITADEL_CONFIG:-citadel.yml}")/.citadel"
+base="$(config_dir "${CITADEL_WORKING_DIRECTORY:-}" "${CITADEL_CONFIG:-}")" || base=""
+citadel_dir="$base/.citadel"
 run_dir=""
-if [[ -d "$citadel_dir/runs" ]]; then
+if [[ -n "$base" && -d "$citadel_dir/runs" ]]; then
   if [[ -z "${CITADEL_ENV:-}" ]]; then
     run_dir="$(find "$citadel_dir/runs" -mindepth 1 -maxdepth 1 -type d -name '*T*Z-*' | sort | tail -n 1)"
   else
@@ -26,7 +27,7 @@ if [[ -n "$run_dir" ]]; then
 fi
 image=""
 state="$citadel_dir/state/${CITADEL_ENV:-}.json"
-if [[ -n "${CITADEL_ENV:-}" && -f "$state" ]]; then
+if [[ -n "$base" && -n "${CITADEL_ENV:-}" && -f "$state" ]]; then
   image="$(jq -r '.image_uri // ""' "$state")"
 fi
 {

@@ -10,6 +10,16 @@ trim() {
   printf '%s' "$s"
 }
 
+# config_dir WORKING_DIRECTORY CONFIG — prints the absolute, normalised
+# directory that holds the config file (where cdk/ and .citadel/ live), or
+# fails when it does not exist. Paths handed to other actions must never be
+# built by joining strings: the defaults ("." and "citadel.yml") would give
+# "././…", and @actions/glob (upload-artifact, setup-go's cache) rejects any
+# "." or ".." segment.
+config_dir() {
+  (cd "${1:-.}/$(dirname "${2:-citadel.yml}")" 2>/dev/null && pwd)
+}
+
 # resolve_env EXPLICIT BRANCH BRANCH_MAP — prints the citadel environment:
 # EXPLICIT when set, else BRANCH's entry in BRANCH_MAP ("main=prod,dev=dev").
 resolve_env() {

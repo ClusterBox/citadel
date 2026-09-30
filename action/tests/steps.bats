@@ -42,7 +42,23 @@ setup() {
   [ ! -s "$GITHUB_OUTPUT" ]
   touch "$w/svc/cdk/go.mod"
   run bash "$SCRIPTS/cdk-go-mod.sh"
-  grep -qx "go-mod=$w/svc/./cdk/go.mod" "$GITHUB_OUTPUT" || grep -qx "go-mod=$w/svc/cdk/go.mod" "$GITHUB_OUTPUT"
+  grep -qx "go-mod=$w/svc/cdk/go.mod" "$GITHUB_OUTPUT"
+}
+
+# Regression: with the default inputs (working-directory "." and config
+# "citadel.yml") the paths used to come out as "././cdk/go.mod", and
+# @actions/glob (setup-go's cache, upload-artifact) rejects "." segments.
+@test "cdk-go-mod with default inputs emits paths without . segments" {
+  w="$BATS_TEST_TMPDIR/wdef"; mkdir -p "$w/cdk"
+  touch "$w/cdk/go.mod" "$w/cdk/go.sum"
+  cd "$w"
+  export CITADEL_WORKING_DIRECTORY=. CITADEL_CONFIG=citadel.yml
+  run bash "$SCRIPTS/cdk-go-mod.sh"
+  [ "$status" -eq 0 ]
+  grep -qx "go-mod=$w/cdk/go.mod" "$GITHUB_OUTPUT"
+  grep -qx "go-sum=$w/cdk/go.sum" "$GITHUB_OUTPUT"
+  run grep -E '(^|=|/)\.\.?(/|$)' "$GITHUB_OUTPUT"
+  [ "$status" -ne 0 ]
 }
 
 @test "cdk-go-mod reports go-mod without go-sum when go.sum is absent" {
@@ -65,7 +81,7 @@ setup() {
   run bash "$SCRIPTS/locate-run.sh"
   [ "$status" -eq 0 ]
   grep -qx "run-id=20260925T110000Z-bbbb" "$GITHUB_OUTPUT"
-  grep -qx "run-dir=$w/./.citadel/runs/20260925T110000Z-bbbb" "$GITHUB_OUTPUT" || grep -qx "run-dir=$w/.citadel/runs/20260925T110000Z-bbbb" "$GITHUB_OUTPUT"
+  grep -qx "run-dir=$w/.citadel/runs/20260925T110000Z-bbbb" "$GITHUB_OUTPUT"
   grep -qx "image-uri=repo:abc" "$GITHUB_OUTPUT"
 }
 
@@ -87,6 +103,28 @@ setup() {
   run bash "$SCRIPTS/locate-run.sh"
   [ "$status" -eq 0 ]
   grep -qx "run-id=20260925T110000Z-bbbb" "$GITHUB_OUTPUT"
+}
+
+# Regression (legolas deploy, 2026-09-27): the default inputs produced
+# run-dir=././.citadel/runs/<id>, and actions/upload-artifact failed the job
+# with "Invalid pattern ... Relative pathing '.' and '..' is not allowed".
+@test "locate-run with default inputs emits a run-dir without . segments" {
+  w="$BATS_TEST_TMPDIR/wdef2"; mkdir -p "$w/.citadel/runs/20260927T212643Z-115b"
+  echo '{"env":"dev"}' > "$w/.citadel/runs/20260927T212643Z-115b/run.json"
+  cd "$w"
+  export CITADEL_WORKING_DIRECTORY=. CITADEL_CONFIG=citadel.yml CITADEL_ENV=dev
+  run bash "$SCRIPTS/locate-run.sh"
+  [ "$status" -eq 0 ]
+  grep -qx "run-dir=$w/.citadel/runs/20260927T212643Z-115b" "$GITHUB_OUTPUT"
+  run grep -E '(^|=|/)\.\.?(/|$)' "$GITHUB_OUTPUT"
+  [ "$status" -ne 0 ]
+}
+
+@test "locate-run writes empty outputs when the working directory does not exist" {
+  export CITADEL_WORKING_DIRECTORY="$BATS_TEST_TMPDIR/nope" CITADEL_CONFIG=citadel.yml CITADEL_ENV=dev
+  run bash "$SCRIPTS/locate-run.sh"
+  [ "$status" -eq 0 ]
+  grep -qx "run-dir=" "$GITHUB_OUTPUT"
 }
 
 @test "locate-run writes empty outputs when citadel never started a run" {
