@@ -4,8 +4,9 @@ set -euo pipefail
 # shellcheck source=lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-cdk_dir="${CITADEL_WORKING_DIRECTORY:-.}/$(dirname "${CITADEL_CONFIG:-citadel.yml}")/cdk"
-if [[ -f "$cdk_dir/go.mod" ]]; then
+base="$(config_dir "${CITADEL_WORKING_DIRECTORY:-}" "${CITADEL_CONFIG:-}")" || base=""
+cdk_dir="$base/cdk"
+if [[ -n "$base" && -f "$cdk_dir/go.mod" ]]; then
   {
     echo "go-mod=$cdk_dir/go.mod"
     if [[ -f "$cdk_dir/go.sum" ]]; then
