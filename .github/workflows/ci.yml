@@ -50,3 +50,33 @@ jobs:
           citadel --version
           cd "$RUNNER_TEMP"
           citadel init --lambda --yes --account 111111111111 --dry-run
+      # The action hands these script outputs to actions/upload-artifact and
+      # actions/setup-go, whose glob rejects "." path segments and can skip
+      # hidden directories. Use the same default inputs a consumer workflow
+      # does, against the real actions, so a bad path fails here, not in a
+      # service's deploy.
+      - name: Locate a recorded run the way the action does
+        id: run
+        run: |
+          run=.citadel/runs/20260101T000000Z-abcd
+          mkdir -p "$run" cdk
+          echo '{"id":"20260101T000000Z-abcd","env":"dev","git_sha":"abc1234","status":"success","steps":[]}' > "$run/run.json"
+          echo "build log" > "$run/01-build.log"
+          printf 'module smoke\n\ngo 1.25\n' > cdk/go.mod
+          : > cdk/go.sum
+          CITADEL_WORKING_DIRECTORY=. CITADEL_CONFIG=citadel.yml CITADEL_ENV=dev bash action/scripts/locate-run.sh
+          CITADEL_WORKING_DIRECTORY=. CITADEL_CONFIG=citadel.yml bash action/scripts/cdk-go-mod.sh
+          cat "$GITHUB_OUTPUT"
+      - name: Upload it like the action does
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-run-${{ matrix.os }}
+          path: ${{ steps.run.outputs.run-dir }}
+          if-no-files-found: error
+          retention-days: 1
+      - name: Set up Go for the CDK app like the action does
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ steps.run.outputs.go-mod }}
+          cache: true
+          cache-dependency-path: ${{ steps.run.outputs.go-sum }}
