@@ -70,23 +70,31 @@ func NewDeployableService(scope constructs.Construct, id string, props *Deployab
 	// Add container with auto-generated secrets
 	buildContainer(stack, cfg, envCfg, taskDef, repo, logGroup, cache, props.Environment)
 
-	// Build Fargate service
-	service := buildFargateService(stack, cfg, envCfg, cluster, taskDef, vpc, props.Environment)
+	// Build Fargate service, reached through the environment's ingress: an
+	// ALB, or a Cloudflare tunnel sidecar (no ALB, no CloudFront)
+	var service awsecs.FargateService
+	var alb awsecspatterns.ApplicationLoadBalancedFargateService
+	switch envCfg.ResolvedIngress() {
+	case config.IngressCloudflareTunnel:
+		addTunnelSidecar(stack, cfg, taskDef, logGroup, props.Environment)
+		service = buildTunnelService(stack, cfg, envCfg, cluster, taskDef, props.Environment)
+	default:
+		alb = buildFargateService(stack, cfg, envCfg, cluster, taskDef, vpc, props.Environment)
+		configureHealthCheck(alb, cfg)
+		service = alb.Service()
+	}
 	if cache != nil {
-		cache.allowFrom(service.Service())
+		cache.allowFrom(service)
 	}
 
-	// Configure health check
-	configureHealthCheck(service, cfg)
-
-	// Build CloudFront (if enabled)
+	// Build CloudFront (if enabled; it fronts the ALB, so tunnel envs skip it)
 	var distribution awscloudfront.Distribution
-	if cfg.CloudFront != nil && cfg.CloudFront.Enabled {
-		distribution = buildCloudFront(stack, cfg, service, props.Environment)
+	if alb != nil && cfg.CloudFront != nil && cfg.CloudFront.Enabled {
+		distribution = buildCloudFront(stack, cfg, alb, props.Environment)
 	}
 
 	// Outputs
-	buildOutputs(stack, cfg, service, repo, distribution, cache)
+	buildOutputs(stack, cfg, service, alb, repo, distribution, cache)
 
 	return stack
 }
@@ -147,7 +155,9 @@ func buildECRRepository(stack awscdk.Stack, cfg *config.DeployConfig, env string
 func buildECSCluster(stack awscdk.Stack, cfg *config.DeployConfig, vpc awsec2.Vpc, env string) awsecs.Cluster {
 	containerInsights := awsecs.ContainerInsights_DISABLED
 	if env == "prod" {
-		containerInsights = awsecs.ContainerInsights_ENHANCED
+		// Standard, not enhanced: enhanced bills per-container metrics
+		// (~$12/month for a two-task service) for detail we don't use.
+		containerInsights = awsecs.ContainerInsights_ENABLED
 	}
 
 	return awsecs.NewCluster(stack, jsii.String("Cluster"), &awsecs.ClusterProps{
@@ -318,22 +328,6 @@ func buildContainer(stack awscdk.Stack, cfg *config.DeployConfig, envCfg *config
 
 // buildFargateService creates the Fargate service with ALB
 func buildFargateService(stack awscdk.Stack, cfg *config.DeployConfig, envCfg *config.EnvConfig, cluster awsecs.Cluster, taskDef awsecs.FargateTaskDefinition, vpc awsec2.Vpc, env string) awsecspatterns.ApplicationLoadBalancedFargateService {
-	// Capacity provider strategies
-	var capacityProviderStrategies *[]*awsecs.CapacityProviderStrategy
-	if envCfg.FargateSpot {
-		capacityProviderStrategies = &[]*awsecs.CapacityProviderStrategy{
-			{
-				CapacityProvider: jsii.String("FARGATE_SPOT"),
-				Weight:           jsii.Number(1),
-			},
-			{
-				CapacityProvider: jsii.String("FARGATE"),
-				Weight:           jsii.Number(0),
-				Base:             jsii.Number(0),
-			},
-		}
-	}
-
 	// Subnet selection: dev tasks need a public IP to reach the internet
 	// without a NAT gateway.
 	subnetType := taskSubnetType(env)
@@ -346,7 +340,7 @@ func buildFargateService(stack awscdk.Stack, cfg *config.DeployConfig, envCfg *c
 		ServiceName:                jsii.String(fmt.Sprintf("%s-service", cfg.ResolvedName(env))),
 		AssignPublicIp:             jsii.Bool(assignPublicIP),
 		PublicLoadBalancer:         jsii.Bool(true),
-		CapacityProviderStrategies: capacityProviderStrategies,
+		CapacityProviderStrategies: capacityProviderStrategies(envCfg),
 		TaskSubnets: &awsec2.SubnetSelection{
 			SubnetType: subnetType,
 		},
@@ -357,6 +351,81 @@ func buildFargateService(stack awscdk.Stack, cfg *config.DeployConfig, envCfg *c
 		MinHealthyPercent: jsii.Number(100),
 		MaxHealthyPercent: jsii.Number(200),
 	})
+}
+
+// cloudflaredImage is the tunnel sidecar's image, pinned so a deploy never
+// picks up an untested cloudflared release.
+const cloudflaredImage = "cloudflare/cloudflared:2026.9.3"
+
+// addTunnelSidecar adds the cloudflared container that connects the task to
+// its Cloudflare tunnel. It shares the task's network namespace, so the
+// tunnel's public hostname points at http://localhost:<container.port>. It is
+// essential: without it the task is unreachable, so ECS should replace it.
+func addTunnelSidecar(stack awscdk.Stack, cfg *config.DeployConfig, taskDef awsecs.FargateTaskDefinition, logGroup awslogs.LogGroup, env string) {
+	token := awsssm.StringParameter_FromSecureStringParameterAttributes(
+		stack,
+		jsii.String(fmt.Sprintf("Param-%s", config.TunnelTokenSecret)),
+		&awsssm.SecureStringParameterAttributes{
+			ParameterName: jsii.String(fmt.Sprintf("/%s/%s", cfg.ResolvedName(env), config.TunnelTokenSecret)),
+		},
+	)
+	taskDef.AddContainer(jsii.String("cloudflared"), &awsecs.ContainerDefinitionOptions{
+		Image:     awsecs.ContainerImage_FromRegistry(jsii.String(cloudflaredImage), nil),
+		Essential: jsii.Bool(true),
+		Command:   jsii.Strings("tunnel", "--no-autoupdate", "run"),
+		Secrets: &map[string]awsecs.Secret{
+			"TUNNEL_TOKEN": awsecs.Secret_FromSsmParameter(token),
+		},
+		Logging: awsecs.LogDriver_AwsLogs(&awsecs.AwsLogDriverProps{
+			LogGroup:     logGroup,
+			StreamPrefix: jsii.String("cloudflared"),
+		}),
+	})
+}
+
+// buildTunnelService creates the Fargate service for a tunnel environment:
+// no load balancer and no inbound rule, since cloudflared only dials out.
+func buildTunnelService(stack awscdk.Stack, cfg *config.DeployConfig, envCfg *config.EnvConfig, cluster awsecs.Cluster, taskDef awsecs.FargateTaskDefinition, env string) awsecs.FargateService {
+	// Same construct path as the ALB pattern's service (Service/Service), so
+	// switching an environment's ingress updates its named service and
+	// security group in place instead of replacing them.
+	scope := constructs.NewConstruct(stack, jsii.String("Service"))
+	return awsecs.NewFargateService(scope, jsii.String("Service"), &awsecs.FargateServiceProps{
+		Cluster:                    cluster,
+		TaskDefinition:             taskDef,
+		DesiredCount:               jsii.Number(float64(envCfg.MinCapacity)),
+		ServiceName:                jsii.String(fmt.Sprintf("%s-service", cfg.ResolvedName(env))),
+		AssignPublicIp:             jsii.Bool(env == "dev"),
+		CapacityProviderStrategies: capacityProviderStrategies(envCfg),
+		VpcSubnets: &awsec2.SubnetSelection{
+			SubnetType: taskSubnetType(env),
+		},
+		CircuitBreaker: &awsecs.DeploymentCircuitBreaker{
+			Enable:   jsii.Bool(true),
+			Rollback: jsii.Bool(true),
+		},
+		MinHealthyPercent: jsii.Number(100),
+		MaxHealthyPercent: jsii.Number(200),
+	})
+}
+
+// capacityProviderStrategies runs the service on Fargate Spot when the
+// environment asks for it; nil keeps the default (on-demand Fargate).
+func capacityProviderStrategies(envCfg *config.EnvConfig) *[]*awsecs.CapacityProviderStrategy {
+	if !envCfg.FargateSpot {
+		return nil
+	}
+	return &[]*awsecs.CapacityProviderStrategy{
+		{
+			CapacityProvider: jsii.String("FARGATE_SPOT"),
+			Weight:           jsii.Number(1),
+		},
+		{
+			CapacityProvider: jsii.String("FARGATE"),
+			Weight:           jsii.Number(0),
+			Base:             jsii.Number(0),
+		},
+	}
 }
 
 // taskSubnetType is where the service's tasks (and its cache) run: public
@@ -404,11 +473,14 @@ func buildCloudFront(stack awscdk.Stack, cfg *config.DeployConfig, service awsec
 }
 
 // buildOutputs creates CloudFormation outputs
-func buildOutputs(stack awscdk.Stack, cfg *config.DeployConfig, service awsecspatterns.ApplicationLoadBalancedFargateService, repo awsecr.IRepository, distribution awscloudfront.Distribution, cache *serverlessCache) {
-	awscdk.NewCfnOutput(stack, jsii.String("LoadBalancerDNS"), &awscdk.CfnOutputProps{
-		Value:       service.LoadBalancer().LoadBalancerDnsName(),
-		Description: jsii.String("Application Load Balancer DNS"),
-	})
+// alb is nil for a tunnel environment, which has no load balancer.
+func buildOutputs(stack awscdk.Stack, cfg *config.DeployConfig, service awsecs.FargateService, alb awsecspatterns.ApplicationLoadBalancedFargateService, repo awsecr.IRepository, distribution awscloudfront.Distribution, cache *serverlessCache) {
+	if alb != nil {
+		awscdk.NewCfnOutput(stack, jsii.String("LoadBalancerDNS"), &awscdk.CfnOutputProps{
+			Value:       alb.LoadBalancer().LoadBalancerDnsName(),
+			Description: jsii.String("Application Load Balancer DNS"),
+		})
+	}
 
 	awscdk.NewCfnOutput(stack, jsii.String("EcrRepositoryUri"), &awscdk.CfnOutputProps{
 		Value:       repo.RepositoryUri(),
@@ -416,7 +488,7 @@ func buildOutputs(stack awscdk.Stack, cfg *config.DeployConfig, service awsecspa
 	})
 
 	awscdk.NewCfnOutput(stack, jsii.String("ServiceName"), &awscdk.CfnOutputProps{
-		Value:       service.Service().ServiceName(),
+		Value:       service.ServiceName(),
 		Description: jsii.String("ECS Service Name"),
 	})
 

@@ -114,10 +114,11 @@ type ContainerConfig struct {
 
 // EnvConfig defines per-environment settings
 type EnvConfig struct {
-	Account     string `yaml:"account"`
-	MinCapacity int    `yaml:"min_capacity"`
-	MaxCapacity int    `yaml:"max_capacity"`
-	FargateSpot bool   `yaml:"fargate_spot,omitempty"`
+	Account     string  `yaml:"account"`
+	MinCapacity int     `yaml:"min_capacity"`
+	MaxCapacity int     `yaml:"max_capacity"`
+	FargateSpot bool    `yaml:"fargate_spot,omitempty"`
+	Ingress     Ingress `yaml:"ingress,omitempty"`
 }
 
 // VPCConfig defines custom VPC settings (optional)
@@ -202,6 +203,9 @@ func (c *DeployConfig) Validate() error {
 		return err
 	}
 	if err := c.validateCache(); err != nil {
+		return err
+	}
+	if err := c.validateIngress(); err != nil {
 		return err
 	}
 	if err := c.validatePipeline(); err != nil {

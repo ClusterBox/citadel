@@ -104,8 +104,8 @@ cdk deploy --context env=dev
 - **IAM Roles**: Execution role (with SSM access) + task role
 - **CloudWatch Logs**: `/ecs/{name}` with 1-week retention
 - **Task Definition**: Auto-generated secrets from `citadel.yml`
-- **Fargate Service**: ALB + health checks + circuit breaker
-- **CloudFront**: Optional HTTPS termination
+- **Fargate Service**: ALB + health checks + circuit breaker (or a Cloudflare tunnel sidecar, see below)
+- **CloudFront**: Optional HTTPS termination (ALB environments only)
 
 ## Environment-Specific Behavior
 
@@ -117,7 +117,7 @@ cdk deploy --context env=dev
 
 ### Prod
 - Private subnets with NAT Gateway
-- Enhanced Container Insights
+- Container Insights (standard)
 - On-demand Fargate (reliability)
 - No public IPs
 
@@ -149,6 +149,32 @@ cloudfront:
   enabled: true
   comment: "My API HTTPS distribution"
 ```
+
+### Cloudflare Tunnel ingress
+
+An environment can skip the ALB (and CloudFront) and be reached through a
+Cloudflare tunnel instead. That saves the ALB and its public IPs (~$24/month
+per environment) and keeps WebSockets and streaming responses working.
+
+```yaml
+environments:
+  dev:
+    ingress: cloudflare_tunnel   # default: alb
+```
+
+Citadel adds a `cloudflared` sidecar (pinned image) to the task. It dials out
+to Cloudflare, so the service has no load balancer and no inbound rule. Before
+the first deploy:
+
+1. Create a remotely-managed tunnel in Cloudflare Zero Trust and give it a
+   public hostname whose service is `http://localhost:<container.port>`.
+2. Store the tunnel token in SSM as a SecureString at
+   `/<name>-<env>/CLOUDFLARE_TUNNEL_TOKEN`. Only the sidecar receives it, as
+   `TUNNEL_TOKEN`, so don't list it under `secrets:`.
+
+Switching an existing environment updates its ECS service in place; the ALB,
+its target group and the CloudFront distribution are deleted, so clients must
+move to the tunnel hostname.
 
 ## Example Projects
 
