@@ -390,7 +390,7 @@ func buildTunnelService(stack awscdk.Stack, cfg *config.DeployConfig, envCfg *co
 	// switching an environment's ingress updates its named service and
 	// security group in place instead of replacing them.
 	scope := constructs.NewConstruct(stack, jsii.String("Service"))
-	return awsecs.NewFargateService(scope, jsii.String("Service"), &awsecs.FargateServiceProps{
+	service := awsecs.NewFargateService(scope, jsii.String("Service"), &awsecs.FargateServiceProps{
 		Cluster:                    cluster,
 		TaskDefinition:             taskDef,
 		DesiredCount:               jsii.Number(float64(envCfg.MinCapacity)),
@@ -407,6 +407,13 @@ func buildTunnelService(stack awscdk.Stack, cfg *config.DeployConfig, envCfg *co
 		MinHealthyPercent: jsii.Number(100),
 		MaxHealthyPercent: jsii.Number(200),
 	})
+
+	// CloudFormation leaves an omitted LoadBalancers on the live service, so a
+	// service switched off its ALB kept the deleted target group and the next
+	// rollout would fail registering tasks with it. An explicit empty list
+	// clears it.
+	service.Node().DefaultChild().(awsecs.CfnService).AddPropertyOverride(jsii.String("LoadBalancers"), []interface{}{})
+	return service
 }
 
 // capacityProviderStrategies runs the service on Fargate Spot when the
