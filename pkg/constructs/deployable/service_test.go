@@ -299,8 +299,11 @@ func TestTunnelIngressKeepsServiceLogicalIDs(t *testing.T) {
 func TestTunnelServiceKeepsPublicIPForEgress(t *testing.T) {
 	tpl := synth(t, tunnelYAML, "dev")
 	tpl.HasResourceProperties(jsii.String("AWS::ECS::Service"), map[string]any{
-		"ServiceName":   "demo-dev-service",
-		"LoadBalancers": assertions.Match_Absent(),
+		"ServiceName": "demo-dev-service",
+		// Explicitly empty, not absent: CloudFormation leaves an omitted
+		// LoadBalancers on the live service, so an env switched off its ALB
+		// would keep registering tasks with the deleted target group.
+		"LoadBalancers": []any{},
 		"NetworkConfiguration": map[string]any{
 			"AwsvpcConfiguration": assertions.Match_ObjectLike(&map[string]any{"AssignPublicIp": "ENABLED"}),
 		},
