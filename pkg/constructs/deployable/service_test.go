@@ -217,3 +217,100 @@ func TestSecurityGroupDescriptionsAreValidForEC2(t *testing.T) {
 		}
 	}
 }
+
+// tunnelYAML runs dev behind a Cloudflare tunnel and prod behind the ALB,
+// with CloudFront on, so each test can see both ingress paths.
+const tunnelYAML = `
+name: demo
+region: us-east-1
+container: {port: 8080, cpu: 256, memory: 512, health_check_path: /health}
+environments:
+  dev: {account: "111111111111", min_capacity: 1, max_capacity: 2, ingress: cloudflare_tunnel}
+  prod: {account: "111111111111", min_capacity: 2, max_capacity: 6}
+secrets: [DATABASE_URL]
+cloudfront: {enabled: true}
+`
+
+func TestTunnelIngressDropsLoadBalancerAndCloudFront(t *testing.T) {
+	for env, want := range map[string]float64{"dev": 0, "prod": 1} {
+		tpl := synth(t, tunnelYAML, env)
+		tpl.ResourceCountIs(jsii.String("AWS::ElasticLoadBalancingV2::LoadBalancer"), jsii.Number(want))
+		tpl.ResourceCountIs(jsii.String("AWS::ElasticLoadBalancingV2::TargetGroup"), jsii.Number(want))
+		tpl.ResourceCountIs(jsii.String("AWS::CloudFront::Distribution"), jsii.Number(want))
+	}
+}
+
+func TestTunnelIngressAddsCloudflaredSidecar(t *testing.T) {
+	tpl := synth(t, tunnelYAML, "dev")
+	tpl.HasResourceProperties(jsii.String("AWS::ECS::TaskDefinition"), map[string]any{
+		"ContainerDefinitions": assertions.Match_ArrayWith(&[]any{
+			assertions.Match_ObjectLike(&map[string]any{
+				"Name":      "cloudflared",
+				"Image":     "cloudflare/cloudflared:2026.9.3",
+				"Essential": true,
+				"Command":   []any{"tunnel", "--no-autoupdate", "run"},
+				"Secrets": []any{
+					assertions.Match_ObjectLike(&map[string]any{
+						"Name": "TUNNEL_TOKEN",
+						"ValueFrom": map[string]any{"Fn::Join": []any{"", assertions.Match_ArrayWith(&[]any{
+							":parameter/demo-dev/CLOUDFLARE_TUNNEL_TOKEN",
+						})}},
+					}),
+				},
+			}),
+		}),
+	})
+	// The app container never sees the token.
+	tpl.HasResourceProperties(jsii.String("AWS::ECS::TaskDefinition"), map[string]any{
+		"ContainerDefinitions": assertions.Match_ArrayWith(&[]any{
+			assertions.Match_ObjectLike(&map[string]any{
+				"Name": "AppContainer",
+				"Secrets": assertions.Match_Not(assertions.Match_ArrayWith(&[]any{
+					assertions.Match_ObjectLike(&map[string]any{"Name": "TUNNEL_TOKEN"}),
+				})),
+			}),
+		}),
+	})
+}
+
+// Switching an environment to the tunnel must update its ECS service and
+// security group in place: both carry fixed names, so a new logical ID would
+// make CloudFormation create the replacement first and fail on the name.
+func TestTunnelIngressKeepsServiceLogicalIDs(t *testing.T) {
+	ids := func(yaml string) map[string][]string {
+		resources := (*synth(t, yaml, "dev").ToJSON())["Resources"].(map[string]any)
+		out := map[string][]string{}
+		for id, r := range resources {
+			typ := r.(map[string]any)["Type"].(string)
+			if typ == "AWS::ECS::Service" || (typ == "AWS::EC2::SecurityGroup" && regexp.MustCompile(`^ServiceSecurityGroup`).MatchString(id)) {
+				out[typ] = append(out[typ], id)
+			}
+		}
+		return out
+	}
+	alb, tunnel := ids(baseYAML), ids(tunnelYAML)
+	for _, typ := range []string{"AWS::ECS::Service", "AWS::EC2::SecurityGroup"} {
+		if len(alb[typ]) != 1 || fmt.Sprint(alb[typ]) != fmt.Sprint(tunnel[typ]) {
+			t.Errorf("%s logical IDs: alb %v, tunnel %v; want the same single ID", typ, alb[typ], tunnel[typ])
+		}
+	}
+}
+
+func TestTunnelServiceKeepsPublicIPForEgress(t *testing.T) {
+	tpl := synth(t, tunnelYAML, "dev")
+	tpl.HasResourceProperties(jsii.String("AWS::ECS::Service"), map[string]any{
+		"ServiceName":   "demo-dev-service",
+		"LoadBalancers": assertions.Match_Absent(),
+		"NetworkConfiguration": map[string]any{
+			"AwsvpcConfiguration": assertions.Match_ObjectLike(&map[string]any{"AssignPublicIp": "ENABLED"}),
+		},
+	})
+}
+
+// Enhanced observability bills per container metric; prod uses standard.
+func TestProdContainerInsightsIsStandard(t *testing.T) {
+	tpl := synth(t, baseYAML, "prod")
+	tpl.HasResourceProperties(jsii.String("AWS::ECS::Cluster"), map[string]any{
+		"ClusterSettings": []any{map[string]any{"Name": "containerInsights", "Value": "enabled"}},
+	})
+}
