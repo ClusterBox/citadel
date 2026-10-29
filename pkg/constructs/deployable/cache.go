@@ -28,7 +28,7 @@ type serverlessCache struct {
 // buildCache creates the ElastiCache Serverless cache declared by cache:, in
 // the same subnets as the service's tasks, behind a security group that
 // admits nothing until allowFrom opens it to the service. Nil when absent.
-func buildCache(stack awscdk.Stack, cfg *config.DeployConfig, vpc awsec2.Vpc, env string) *serverlessCache {
+func buildCache(stack awscdk.Stack, cfg *config.DeployConfig, vpc awsec2.IVpc, env string) *serverlessCache {
 	if cfg.Cache == nil {
 		return nil
 	}

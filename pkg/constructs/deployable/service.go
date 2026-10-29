@@ -32,7 +32,6 @@ func NewDeployableService(scope constructs.Construct, id string, props *Deployab
 	if props != nil {
 		sprops = props.StackProps
 	}
-	stack := awscdk.NewStack(scope, &id, &sprops)
 
 	// Load citadel.yml config
 	cfg, err := config.Load(props.ConfigPath)
@@ -45,6 +44,14 @@ func NewDeployableService(scope constructs.Construct, id string, props *Deployab
 	if err != nil {
 		panic(fmt.Sprintf("Failed to get environment config: %v", err))
 	}
+
+	// A VPC lookup needs a concrete account. Only pin it for vpc_id envs:
+	// pinning it elsewhere would turn Fn::GetAZs into looked-up AZ names and
+	// replace the subnets of VPCs citadel already created.
+	if envCfg.VPCID != "" {
+		sprops.Env = pinAccount(sprops.Env, envCfg.Account)
+	}
+	stack := awscdk.NewStack(scope, &id, &sprops)
 
 	// Build VPC
 	vpc := buildVPC(stack, cfg, envCfg, props.Environment)
@@ -99,8 +106,28 @@ func NewDeployableService(scope constructs.Construct, id string, props *Deployab
 	return stack
 }
 
-// buildVPC creates a VPC with environment-specific configuration
-func buildVPC(stack awscdk.Stack, cfg *config.DeployConfig, envCfg *config.EnvConfig, env string) awsec2.Vpc {
+// pinAccount returns env with Account set, keeping its region; an account
+// the caller already set wins.
+func pinAccount(env *awscdk.Environment, account string) *awscdk.Environment {
+	out := awscdk.Environment{}
+	if env != nil {
+		out = *env
+	}
+	if out.Account == nil {
+		out.Account = jsii.String(account)
+	}
+	return &out
+}
+
+// buildVPC looks up the environment's existing VPC (vpc_id) or creates one
+// with environment-specific configuration
+func buildVPC(stack awscdk.Stack, cfg *config.DeployConfig, envCfg *config.EnvConfig, env string) awsec2.IVpc {
+	if envCfg.VPCID != "" {
+		return awsec2.Vpc_FromLookup(stack, jsii.String("Vpc"), &awsec2.VpcLookupOptions{
+			VpcId: jsii.String(envCfg.VPCID),
+		})
+	}
+
 	maxAZs := 2
 	if cfg.VPC != nil && cfg.VPC.MaxAZs > 0 {
 		maxAZs = cfg.VPC.MaxAZs
@@ -152,7 +179,7 @@ func buildECRRepository(stack awscdk.Stack, cfg *config.DeployConfig, env string
 }
 
 // buildECSCluster creates an ECS cluster
-func buildECSCluster(stack awscdk.Stack, cfg *config.DeployConfig, vpc awsec2.Vpc, env string) awsecs.Cluster {
+func buildECSCluster(stack awscdk.Stack, cfg *config.DeployConfig, vpc awsec2.IVpc, env string) awsecs.Cluster {
 	containerInsights := awsecs.ContainerInsights_DISABLED
 	if env == "prod" {
 		// Standard, not enhanced: enhanced bills per-container metrics
@@ -327,7 +354,7 @@ func buildContainer(stack awscdk.Stack, cfg *config.DeployConfig, envCfg *config
 }
 
 // buildFargateService creates the Fargate service with ALB
-func buildFargateService(stack awscdk.Stack, cfg *config.DeployConfig, envCfg *config.EnvConfig, cluster awsecs.Cluster, taskDef awsecs.FargateTaskDefinition, vpc awsec2.Vpc, env string) awsecspatterns.ApplicationLoadBalancedFargateService {
+func buildFargateService(stack awscdk.Stack, cfg *config.DeployConfig, envCfg *config.EnvConfig, cluster awsecs.Cluster, taskDef awsecs.FargateTaskDefinition, vpc awsec2.IVpc, env string) awsecspatterns.ApplicationLoadBalancedFargateService {
 	// Subnet selection: dev tasks need a public IP to reach the internet
 	// without a NAT gateway.
 	subnetType := taskSubnetType(env)

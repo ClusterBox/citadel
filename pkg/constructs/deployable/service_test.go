@@ -317,3 +317,54 @@ func TestProdContainerInsightsIsStandard(t *testing.T) {
 		"ClusterSettings": []any{map[string]any{"Name": "containerInsights", "Value": "enabled"}},
 	})
 }
+
+const existingVPCYAML = `
+name: demo
+region: us-east-1
+container: {port: 8080, cpu: 256, memory: 512, health_check_path: /health}
+environments:
+  dev: {account: "111111111111", min_capacity: 1, max_capacity: 2, ingress: cloudflare_tunnel, vpc_id: vpc-0123456789abcdef0}
+  prod: {account: "111111111111", min_capacity: 2, max_capacity: 6, vpc_id: vpc-0123456789abcdef0}
+secrets: [DATABASE_URL]
+cache: {engine: valkey, serverless: true}
+`
+
+// An environment with vpc_id creates no network of its own: no VPC, gateways,
+// NAT or Elastic IPs.
+func TestExistingVPCCreatesNoNetwork(t *testing.T) {
+	for _, env := range []string{"dev", "prod"} {
+		tpl := synth(t, existingVPCYAML, env)
+		for _, typ := range []string{"AWS::EC2::VPC", "AWS::EC2::Subnet", "AWS::EC2::InternetGateway", "AWS::EC2::NatGateway", "AWS::EC2::EIP"} {
+			tpl.ResourceCountIs(jsii.String(typ), jsii.Number(0))
+		}
+		tpl.ResourceCountIs(jsii.String("AWS::ECS::Service"), jsii.Number(1))
+	}
+}
+
+// The looked-up VPC's subnets are used as before: prod tasks and the cache in
+// private subnets, without a public IP.
+func TestExistingVPCPlacesProdTasksInPrivateSubnets(t *testing.T) {
+	tpl := synth(t, existingVPCYAML, "prod")
+	tpl.HasResourceProperties(jsii.String("AWS::ECS::Service"), map[string]any{
+		"NetworkConfiguration": map[string]any{
+			"AwsvpcConfiguration": assertions.Match_ObjectLike(&map[string]any{
+				"AssignPublicIp": "DISABLED",
+				"Subnets":        assertions.Match_ArrayWith(&[]any{assertions.Match_StringLikeRegexp(jsii.String("^p-"))}),
+			}),
+		},
+	})
+	tpl.HasResourceProperties(jsii.String("AWS::ElastiCache::ServerlessCache"), map[string]any{
+		"SubnetIds": assertions.Match_ArrayWith(&[]any{assertions.Match_StringLikeRegexp(jsii.String("^p-"))}),
+	})
+}
+
+// Without vpc_id the stack stays account-agnostic, so existing VPCs keep
+// Fn::GetAZs and are not replaced.
+func TestNoVPCIDKeepsStackAccountAgnostic(t *testing.T) {
+	tpl := synth(t, baseYAML, "prod")
+	tpl.HasResourceProperties(jsii.String("AWS::EC2::Subnet"), map[string]any{
+		"AvailabilityZone": map[string]any{"Fn::Select": assertions.Match_ArrayWith(&[]any{
+			map[string]any{"Fn::GetAZs": ""},
+		})},
+	})
+}

@@ -142,6 +142,16 @@ vpc:
   nat_gateways: 2  # prod only
 ```
 
+### Existing VPC
+
+```yaml
+environments:
+  prod:
+    vpc_id: vpc-0123456789abcdef0  # look up this VPC instead of creating one
+```
+
+See the top-level README (`vpc_id:`).
+
 ### CloudFront
 
 ```yaml

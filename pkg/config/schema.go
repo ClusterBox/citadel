@@ -119,6 +119,10 @@ type EnvConfig struct {
 	MaxCapacity int     `yaml:"max_capacity"`
 	FargateSpot bool    `yaml:"fargate_spot,omitempty"`
 	Ingress     Ingress `yaml:"ingress,omitempty"`
+	// VPCID runs the environment in an existing VPC (looked up at synth)
+	// instead of creating one. The VPC needs CDK-tagged public subnets, and
+	// private-with-egress subnets for prod.
+	VPCID string `yaml:"vpc_id,omitempty"`
 }
 
 // VPCConfig defines custom VPC settings (optional)
@@ -206,6 +210,9 @@ func (c *DeployConfig) Validate() error {
 		return err
 	}
 	if err := c.validateIngress(); err != nil {
+		return err
+	}
+	if err := c.validateVPC(); err != nil {
 		return err
 	}
 	if err := c.validatePipeline(); err != nil {
