@@ -58,3 +58,16 @@ func TestCacheName(t *testing.T) {
 		t.Errorf("CacheName = %q, want demo-prod", got)
 	}
 }
+
+func TestCacheNameInExistingVPCCarriesTheVPC(t *testing.T) {
+	cfg := &DeployConfig{Name: "demo", Environments: map[string]EnvConfig{
+		"prod": {VPCID: "vpc-01f19f79f65a87711"},
+		"dev":  {},
+	}}
+	if got := cfg.CacheName("prod"); got != "demo-prod-01f19f79" {
+		t.Errorf("CacheName(prod) = %q, want demo-prod-01f19f79", got)
+	}
+	if got := cfg.CacheName("dev"); got != "demo-dev" {
+		t.Errorf("CacheName(dev) = %q, want demo-dev", got)
+	}
+}

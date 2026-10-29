@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strings"
 )
 
 // CacheEndpointEnvVar is the plain environment variable the cache: block
@@ -66,7 +67,15 @@ func (c *DeployConfig) validateCache() error {
 }
 
 // CacheName is the ElastiCache Serverless cache name for env: "<name>-<env>",
-// like every other per-environment resource.
+// like every other per-environment resource. In a vpc_id environment it ends
+// with the VPC ID's first 8 hex digits ("<name>-<env>-01f19f79"): a cache
+// moving VPCs is replaced, and CloudFormation creates the replacement before
+// deleting the old one, so the two names must differ.
 func (c *DeployConfig) CacheName(env string) string {
-	return c.ResolvedName(env)
+	name := c.ResolvedName(env)
+	if e, ok := c.Environments[env]; ok && e.VPCID != "" {
+		hex := strings.TrimPrefix(e.VPCID, "vpc-")
+		name += "-" + hex[:min(8, len(hex))]
+	}
+	return name
 }

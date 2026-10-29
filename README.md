@@ -394,12 +394,15 @@ time, and creates none of these. Tasks and the cache use the same subnets as
 before: public in dev, private-with-egress elsewhere, so the VPC needs
 CDK-tagged (`aws-cdk:subnet-type`) subnets of those kinds, as any
 citadel-created VPC has. The environment's `account` is required, and `vpc.*`
-settings are ignored for it.
+settings are ignored for it. A `cache:` in such an environment is named
+`<name>-<env>-<first 8 hex digits of the VPC ID>`, so moving an environment
+with a cache onto an existing VPC replaces the cache (its data is lost) under a
+new name instead of failing on the old one.
 
 The VPC's owner can no longer delete it while this service runs there, so
 remove this service (or move it) before tearing that stack down. Moving an
-existing environment onto another VPC replaces its cluster, service and cache,
-so treat it as a fresh deploy.
+existing environment onto another VPC updates its service in place (new
+subnets and security group, a rolling deployment) and deletes its old VPC.
 
 ## Releasing
 
