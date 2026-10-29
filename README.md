@@ -377,6 +377,30 @@ changes that make CloudFormation replace it (for example raising
 `vpc.max_azs`, which changes its subnets) fail the deploy and roll back; to
 apply one, remove the `cache:` block, deploy, then add it back.
 
+### `vpc_id:` — run in an existing VPC (optional, per environment)
+
+```yaml
+environments:
+  prod:
+    account: "454066810976"
+    vpc_id: vpc-01f19f79f65a87711   # e.g. legolas-prod's VPC
+```
+
+By default each environment creates its own VPC, plus a NAT gateway and an
+Elastic IP in prod (about $36/month), and each VPC counts against the
+region's VPC and internet gateway quotas (5 each by default). With `vpc_id`
+the environment instead runs in a VPC that already exists, looked up at synth
+time, and creates none of these. Tasks and the cache use the same subnets as
+before: public in dev, private-with-egress elsewhere, so the VPC needs
+CDK-tagged (`aws-cdk:subnet-type`) subnets of those kinds, as any
+citadel-created VPC has. The environment's `account` is required, and `vpc.*`
+settings are ignored for it.
+
+The VPC's owner can no longer delete it while this service runs there, so
+remove this service (or move it) before tearing that stack down. Moving an
+existing environment onto another VPC replaces its cluster, service and cache,
+so treat it as a fresh deploy.
+
 ## Releasing
 
 Push a tag `vX.Y.Z` on `main`. `.github/workflows/release.yml` runs the tests and
