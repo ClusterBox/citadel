@@ -377,6 +377,27 @@ changes that make CloudFormation replace it (for example raising
 `vpc.max_azs`, which changes its subnets) fail the deploy and roll back; to
 apply one, remove the `cache:` block, deploy, then add it back.
 
+#### `cache_mode: sidecar` — a free Valkey in each task (per environment)
+
+```yaml
+environments:
+  dev:
+    cache_mode: sidecar   # default: serverless
+```
+
+A serverless cache bills its 100 MB storage minimum (about $6/month) even
+when it is nearly empty, which is what a dev cache usually is. With
+`cache_mode: sidecar` the environment gets no ElastiCache cache. Instead each
+task runs a `valkey/valkey` container (the same 9.0 major the serverless
+caches run) on localhost, with no persistence and a 64 MB limit. The app
+container waits until it answers PING. `VALKEY_ENDPOINT` becomes
+`localhost:6379`, and `VALKEY_TLS=false` is added because the sidecar has no
+TLS; the app must honour that variable. Each task has its own cache, so
+nothing is shared between replicas and the data is lost whenever a task
+stops. Use it where that is acceptable (dev), not for state that must outlive
+or span tasks. Switching an environment to `sidecar` deletes its serverless
+cache.
+
 ### `vpc_id:` — run in an existing VPC (optional, per environment)
 
 ```yaml

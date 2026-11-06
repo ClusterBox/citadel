@@ -72,7 +72,7 @@ func NewDeployableService(scope constructs.Construct, id string, props *Deployab
 	taskDef := buildTaskDefinition(stack, cfg, envCfg, executionRole, taskRole)
 
 	// Build the ElastiCache Serverless cache (if declared)
-	cache := buildCache(stack, cfg, vpc, props.Environment)
+	cache := buildCache(stack, cfg, envCfg, vpc, props.Environment)
 
 	// Add container with auto-generated secrets
 	buildContainer(stack, cfg, envCfg, taskDef, repo, logGroup, cache, props.Environment)
@@ -308,6 +308,9 @@ func buildContainer(stack awscdk.Stack, cfg *config.DeployConfig, envCfg *config
 	environment["ENVIRONMENT"] = jsii.String(env)
 	if cache != nil {
 		environment[config.CacheEndpointEnvVar] = cache.endpoint
+		if cache.sidecar {
+			environment[config.CacheTLSEnvVar] = jsii.String("false")
+		}
 	}
 
 	// Resolve the image tag from the "imageTag" CDK context. Deploys pass the
@@ -349,6 +352,10 @@ func buildContainer(stack awscdk.Stack, cfg *config.DeployConfig, envCfg *config
 		ContainerPort: jsii.Number(float64(cfg.Container.Port)),
 		Protocol:      awsecs.Protocol_TCP,
 	})
+
+	if cache != nil && cache.sidecar {
+		addCacheSidecar(taskDef, logGroup, container)
+	}
 
 	return container
 }

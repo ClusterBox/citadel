@@ -127,6 +127,10 @@ type EnvConfig struct {
 	// environment's cluster. Off by default: it bills ~38 CloudWatch metrics
 	// per cluster (~$11/month) whether or not anyone reads them.
 	ContainerInsights bool `yaml:"container_insights,omitempty"`
+	// CacheMode picks how the cache: block is provided in this environment:
+	// "serverless" (default, ElastiCache Serverless) or "sidecar", a Valkey
+	// container in each task. See CacheModeSidecar.
+	CacheMode string `yaml:"cache_mode,omitempty"`
 }
 
 // VPCConfig defines custom VPC settings (optional)

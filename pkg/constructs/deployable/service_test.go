@@ -138,6 +138,36 @@ func TestCacheAdmitsOnlyTheServiceOnItsPorts(t *testing.T) {
 	tpl.HasOutput(jsii.String("CacheEndpoint"), map[string]any{})
 }
 
+// cache_mode: sidecar replaces the serverless cache with a localhost Valkey
+// container that the app waits for, and tells the app to skip TLS.
+func TestCacheSidecarRunsValkeyInTheTask(t *testing.T) {
+	yaml := strings.Replace(cacheYAML, "max_capacity: 2}", "max_capacity: 2, cache_mode: sidecar}", 1)
+	if yaml == cacheYAML {
+		t.Fatal("cacheYAML has no dev max_capacity: 2 to extend")
+	}
+	tpl := synth(t, yaml, "dev")
+	tpl.ResourceCountIs(jsii.String("AWS::ElastiCache::ServerlessCache"), jsii.Number(0))
+	tpl.HasResourceProperties(jsii.String("AWS::ECS::TaskDefinition"), map[string]any{
+		"ContainerDefinitions": assertions.Match_ArrayWith(&[]any{
+			assertions.Match_ObjectLike(&map[string]any{
+				"Name":      "AppContainer",
+				"DependsOn": []any{map[string]any{"ContainerName": "valkey", "Condition": "HEALTHY"}},
+				"Environment": assertions.Match_ArrayWith(&[]any{
+					map[string]any{"Name": "VALKEY_ENDPOINT", "Value": "localhost:6379"},
+					map[string]any{"Name": "VALKEY_TLS", "Value": "false"},
+				}),
+			}),
+			assertions.Match_ObjectLike(&map[string]any{
+				"Name":      "valkey",
+				"Image":     "valkey/valkey:9.0.7-alpine",
+				"Essential": true,
+			}),
+		}),
+	})
+	// prod keeps its serverless cache.
+	synth(t, yaml, "prod").ResourceCountIs(jsii.String("AWS::ElastiCache::ServerlessCache"), jsii.Number(1))
+}
+
 func TestNoCacheBlockCreatesNoCache(t *testing.T) {
 	tpl := synth(t, baseYAML, "dev")
 	tpl.ResourceCountIs(jsii.String("AWS::ElastiCache::ServerlessCache"), jsii.Number(0))
