@@ -123,6 +123,10 @@ type EnvConfig struct {
 	// instead of creating one. The VPC needs CDK-tagged public subnets, and
 	// private-with-egress subnets for prod.
 	VPCID string `yaml:"vpc_id,omitempty"`
+	// ContainerInsights turns on standard Container Insights for the
+	// environment's cluster. Off by default: it bills ~38 CloudWatch metrics
+	// per cluster (~$11/month) whether or not anyone reads them.
+	ContainerInsights bool `yaml:"container_insights,omitempty"`
 }
 
 // VPCConfig defines custom VPC settings (optional)

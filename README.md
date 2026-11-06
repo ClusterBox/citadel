@@ -399,6 +399,20 @@ settings are ignored for it. A `cache:` in such an environment is named
 with a cache onto an existing VPC replaces the cache (its data is lost) under a
 new name instead of failing on the old one.
 
+### `container_insights:` — ECS Container Insights (optional, per environment)
+
+```yaml
+environments:
+  prod:
+    container_insights: true   # default: false
+```
+
+Turns on standard Container Insights for the environment's cluster. It is off
+by default (since v0.8.0; before that prod always had it): each cluster
+publishes about 38 CloudWatch metrics, roughly $11/month, whether or not
+anyone looks at them. Enhanced observability is never used; it bills per
+container.
+
 The VPC's owner can no longer delete it while this service runs there, so
 remove this service (or move it) before tearing that stack down. Moving an
 existing environment onto another VPC updates its service in place (new
