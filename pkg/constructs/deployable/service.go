@@ -60,7 +60,7 @@ func NewDeployableService(scope constructs.Construct, id string, props *Deployab
 	repo := buildECRRepository(stack, cfg, props.Environment)
 
 	// Build ECS cluster
-	cluster := buildECSCluster(stack, cfg, vpc, props.Environment)
+	cluster := buildECSCluster(stack, cfg, envCfg, vpc, props.Environment)
 
 	// Build IAM roles
 	executionRole, taskRole := buildIAMRoles(stack, cfg, props.Environment)
@@ -72,7 +72,7 @@ func NewDeployableService(scope constructs.Construct, id string, props *Deployab
 	taskDef := buildTaskDefinition(stack, cfg, envCfg, executionRole, taskRole)
 
 	// Build the ElastiCache Serverless cache (if declared)
-	cache := buildCache(stack, cfg, vpc, props.Environment)
+	cache := buildCache(stack, cfg, envCfg, vpc, props.Environment)
 
 	// Add container with auto-generated secrets
 	buildContainer(stack, cfg, envCfg, taskDef, repo, logGroup, cache, props.Environment)
@@ -178,12 +178,12 @@ func buildECRRepository(stack awscdk.Stack, cfg *config.DeployConfig, env string
 	return awsecr.Repository_FromRepositoryName(stack, jsii.String("EcrRepo"), jsii.String(repoName))
 }
 
-// buildECSCluster creates an ECS cluster
-func buildECSCluster(stack awscdk.Stack, cfg *config.DeployConfig, vpc awsec2.IVpc, env string) awsecs.Cluster {
+// buildECSCluster creates an ECS cluster. Container Insights is opt-in per
+// environment (container_insights: true) and always standard, never enhanced:
+// enhanced bills per-container metrics for detail we don't use.
+func buildECSCluster(stack awscdk.Stack, cfg *config.DeployConfig, envCfg *config.EnvConfig, vpc awsec2.IVpc, env string) awsecs.Cluster {
 	containerInsights := awsecs.ContainerInsights_DISABLED
-	if env == "prod" {
-		// Standard, not enhanced: enhanced bills per-container metrics
-		// (~$12/month for a two-task service) for detail we don't use.
+	if envCfg.ContainerInsights {
 		containerInsights = awsecs.ContainerInsights_ENABLED
 	}
 
@@ -308,6 +308,9 @@ func buildContainer(stack awscdk.Stack, cfg *config.DeployConfig, envCfg *config
 	environment["ENVIRONMENT"] = jsii.String(env)
 	if cache != nil {
 		environment[config.CacheEndpointEnvVar] = cache.endpoint
+		if cache.sidecar {
+			environment[config.CacheTLSEnvVar] = jsii.String("false")
+		}
 	}
 
 	// Resolve the image tag from the "imageTag" CDK context. Deploys pass the
@@ -349,6 +352,10 @@ func buildContainer(stack awscdk.Stack, cfg *config.DeployConfig, envCfg *config
 		ContainerPort: jsii.Number(float64(cfg.Container.Port)),
 		Protocol:      awsecs.Protocol_TCP,
 	})
+
+	if cache != nil && cache.sidecar {
+		addCacheSidecar(taskDef, logGroup, container)
+	}
 
 	return container
 }
@@ -534,9 +541,13 @@ func buildOutputs(stack awscdk.Stack, cfg *config.DeployConfig, service awsecs.F
 	}
 
 	if cache != nil {
+		description := "ElastiCache Serverless endpoint (host:port, TLS required)"
+		if cache.sidecar {
+			description = "Valkey sidecar in each task (host:port, no TLS)"
+		}
 		awscdk.NewCfnOutput(stack, jsii.String("CacheEndpoint"), &awscdk.CfnOutputProps{
 			Value:       cache.endpoint,
-			Description: jsii.String("ElastiCache Serverless endpoint (host:port, TLS required)"),
+			Description: jsii.String(description),
 		})
 	}
 }

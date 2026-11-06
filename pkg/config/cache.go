@@ -11,6 +11,32 @@ import (
 // injects into the container, holding the cache's "host:port" endpoint.
 const CacheEndpointEnvVar = "VALKEY_ENDPOINT"
 
+// CacheTLSEnvVar is set to "false" in cache_mode: sidecar environments, whose
+// local Valkey has no TLS. Serverless caches always require TLS, so it is not
+// set for them (clients default to TLS).
+const CacheTLSEnvVar = "VALKEY_TLS"
+
+// Cache modes, per environment (cache_mode:).
+const (
+	// CacheModeServerless is an ElastiCache Serverless cache (the default).
+	CacheModeServerless = "serverless"
+	// CacheModeSidecar is a Valkey container in every task, on localhost
+	// without TLS or persistence. It costs nothing beyond the task, but each
+	// task has its own cache (nothing is shared between replicas) and the data
+	// is lost whenever a task stops. Meant for dev, where a serverless cache
+	// still bills its 100 MB storage minimum (~$6/month) while nearly empty.
+	CacheModeSidecar = "sidecar"
+)
+
+// ResolvedCacheMode returns the environment's cache mode, defaulting to
+// CacheModeServerless.
+func (e *EnvConfig) ResolvedCacheMode() string {
+	if e.CacheMode == "" {
+		return CacheModeServerless
+	}
+	return e.CacheMode
+}
+
 // CacheEngineValkey is the only cache engine citadel provisions.
 const CacheEngineValkey = "valkey"
 
@@ -30,6 +56,24 @@ var serverlessCacheName = regexp.MustCompile(`^[a-z](?:[a-z0-9]|-[a-z0-9])*$`)
 
 // validateCache checks the cache: block. An absent block is valid.
 func (c *DeployConfig) validateCache() error {
+	envs := make([]string, 0, len(c.Environments))
+	for env := range c.Environments {
+		envs = append(envs, env)
+	}
+	sort.Strings(envs)
+	sidecar := false
+	for _, env := range envs {
+		switch mode := c.Environments[env].CacheMode; mode {
+		case "", CacheModeServerless:
+		case CacheModeSidecar:
+			sidecar = true
+		default:
+			return fmt.Errorf("environments.%s.cache_mode: %q is not supported; use %q or %q", env, mode, CacheModeServerless, CacheModeSidecar)
+		}
+		if c.Environments[env].CacheMode != "" && c.Cache == nil {
+			return fmt.Errorf("environments.%s.cache_mode is set but there is no cache: block", env)
+		}
+	}
 	if c.Cache == nil {
 		return nil
 	}
@@ -52,12 +96,13 @@ func (c *DeployConfig) validateCache() error {
 		if s == CacheEndpointEnvVar {
 			return fmt.Errorf("%s is set by cache:; remove it from secrets", CacheEndpointEnvVar)
 		}
+		if sidecar && s == CacheTLSEnvVar {
+			return fmt.Errorf("%s is set by cache_mode: sidecar; remove it from secrets", CacheTLSEnvVar)
+		}
 	}
-	envs := make([]string, 0, len(c.Environments))
-	for env := range c.Environments {
-		envs = append(envs, env)
+	if _, ok := c.Env[CacheTLSEnvVar]; sidecar && ok {
+		return fmt.Errorf("%s is set by cache_mode: sidecar; remove it from env", CacheTLSEnvVar)
 	}
-	sort.Strings(envs)
 	for _, env := range envs {
 		if name := c.CacheName(env); len(name) > 40 || !serverlessCacheName.MatchString(name) {
 			return fmt.Errorf("cache: name %q (from <name>-<env>) must be at most 40 lowercase letters, digits and single hyphens, starting with a letter", name)

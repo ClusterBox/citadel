@@ -23,6 +23,19 @@ func TestValidate_Cache(t *testing.T) {
 		"name too long":          {func(c *DeployConfig) { c.Name = strings.Repeat("a", 37) }, "at most 40"},
 		"name at the limit":      {func(c *DeployConfig) { c.Name = strings.Repeat("a", 36) }, ""},
 		"double hyphen":          {func(c *DeployConfig) { c.Name = "demo-" }, `"demo--dev"`},
+		"dev sidecar":            {func(c *DeployConfig) { setCacheMode(c, "dev", "sidecar") }, ""},
+		"explicit serverless":    {func(c *DeployConfig) { setCacheMode(c, "dev", "serverless") }, ""},
+		"unknown cache mode":     {func(c *DeployConfig) { setCacheMode(c, "dev", "local") }, `"local" is not supported`},
+		"mode without cache":     {func(c *DeployConfig) { setCacheMode(c, "dev", "sidecar"); c.Cache = nil }, "no cache: block"},
+		"sidecar TLS secret": {func(c *DeployConfig) {
+			setCacheMode(c, "dev", "sidecar")
+			c.Secrets = append(c.Secrets, "VALKEY_TLS")
+		}, "remove it from secrets"},
+		"sidecar TLS env": {func(c *DeployConfig) {
+			setCacheMode(c, "dev", "sidecar")
+			c.Env = map[string]string{"VALKEY_TLS": "true"}
+		}, "remove it from env"},
+		"TLS env without sidecar": {func(c *DeployConfig) { c.Env = map[string]string{"VALKEY_TLS": "true"} }, ""},
 	}
 	for name, tc := range cases {
 		cfg := baseValidConfig()
@@ -70,4 +83,10 @@ func TestCacheNameInExistingVPCCarriesTheVPC(t *testing.T) {
 	if got := cfg.CacheName("dev"); got != "demo-dev" {
 		t.Errorf("CacheName(dev) = %q, want demo-dev", got)
 	}
+}
+
+func setCacheMode(c *DeployConfig, env, mode string) {
+	e := c.Environments[env]
+	e.CacheMode = mode
+	c.Environments[env] = e
 }

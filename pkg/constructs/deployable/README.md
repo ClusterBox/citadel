@@ -152,6 +152,16 @@ environments:
 
 See the top-level README (`vpc_id:`).
 
+### Container Insights
+
+```yaml
+environments:
+  prod:
+    container_insights: true  # standard Container Insights; default: false
+```
+
+See the top-level README (`container_insights:`).
+
 ### CloudFront
 
 ```yaml

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/aws/aws-cdk-go/awscdk/v2"
@@ -135,6 +136,36 @@ func TestCacheAdmitsOnlyTheServiceOnItsPorts(t *testing.T) {
 		"SourceSecurityGroupId": map[string]any{"Fn::GetAtt": []any{assertions.Match_StringLikeRegexp(jsii.String("^ServiceSecurityGroup")), "GroupId"}},
 	})
 	tpl.HasOutput(jsii.String("CacheEndpoint"), map[string]any{})
+}
+
+// cache_mode: sidecar replaces the serverless cache with a localhost Valkey
+// container that the app waits for, and tells the app to skip TLS.
+func TestCacheSidecarRunsValkeyInTheTask(t *testing.T) {
+	yaml := strings.Replace(cacheYAML, "max_capacity: 2}", "max_capacity: 2, cache_mode: sidecar}", 1)
+	if yaml == cacheYAML {
+		t.Fatal("cacheYAML has no dev max_capacity: 2 to extend")
+	}
+	tpl := synth(t, yaml, "dev")
+	tpl.ResourceCountIs(jsii.String("AWS::ElastiCache::ServerlessCache"), jsii.Number(0))
+	tpl.HasResourceProperties(jsii.String("AWS::ECS::TaskDefinition"), map[string]any{
+		"ContainerDefinitions": assertions.Match_ArrayWith(&[]any{
+			assertions.Match_ObjectLike(&map[string]any{
+				"Name":      "AppContainer",
+				"DependsOn": []any{map[string]any{"ContainerName": "valkey", "Condition": "HEALTHY"}},
+				"Environment": assertions.Match_ArrayWith(&[]any{
+					map[string]any{"Name": "VALKEY_ENDPOINT", "Value": "localhost:6379"},
+					map[string]any{"Name": "VALKEY_TLS", "Value": "false"},
+				}),
+			}),
+			assertions.Match_ObjectLike(&map[string]any{
+				"Name":      "valkey",
+				"Image":     "valkey/valkey:9.0.7-alpine",
+				"Essential": true,
+			}),
+		}),
+	})
+	// prod keeps its serverless cache.
+	synth(t, yaml, "prod").ResourceCountIs(jsii.String("AWS::ElastiCache::ServerlessCache"), jsii.Number(1))
 }
 
 func TestNoCacheBlockCreatesNoCache(t *testing.T) {
@@ -310,12 +341,21 @@ func TestTunnelServiceKeepsPublicIPForEgress(t *testing.T) {
 	})
 }
 
-// Enhanced observability bills per container metric; prod uses standard.
-func TestProdContainerInsightsIsStandard(t *testing.T) {
-	tpl := synth(t, baseYAML, "prod")
-	tpl.HasResourceProperties(jsii.String("AWS::ECS::Cluster"), map[string]any{
-		"ClusterSettings": []any{map[string]any{"Name": "containerInsights", "Value": "enabled"}},
-	})
+// Container Insights is opt-in per environment, and standard (never enhanced,
+// which bills per container metric) when on.
+func TestContainerInsightsIsOptIn(t *testing.T) {
+	setting := func(v string) map[string]any {
+		return map[string]any{"ClusterSettings": []any{map[string]any{"Name": "containerInsights", "Value": v}}}
+	}
+	for _, env := range []string{"dev", "prod"} {
+		synth(t, baseYAML, env).HasResourceProperties(jsii.String("AWS::ECS::Cluster"), setting("disabled"))
+	}
+	optIn := strings.Replace(baseYAML, "max_capacity: 6", "max_capacity: 6, container_insights: true", 1)
+	if optIn == baseYAML {
+		t.Fatal("baseYAML has no prod max_capacity: 6 to extend")
+	}
+	synth(t, optIn, "prod").HasResourceProperties(jsii.String("AWS::ECS::Cluster"), setting("enabled"))
+	synth(t, optIn, "dev").HasResourceProperties(jsii.String("AWS::ECS::Cluster"), setting("disabled"))
 }
 
 const existingVPCYAML = `
