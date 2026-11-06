@@ -541,9 +541,13 @@ func buildOutputs(stack awscdk.Stack, cfg *config.DeployConfig, service awsecs.F
 	}
 
 	if cache != nil {
+		description := "ElastiCache Serverless endpoint (host:port, TLS required)"
+		if cache.sidecar {
+			description = "Valkey sidecar in each task (host:port, no TLS)"
+		}
 		awscdk.NewCfnOutput(stack, jsii.String("CacheEndpoint"), &awscdk.CfnOutputProps{
 			Value:       cache.endpoint,
-			Description: jsii.String("ElastiCache Serverless endpoint (host:port, TLS required)"),
+			Description: jsii.String(description),
 		})
 	}
 }
